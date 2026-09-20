@@ -4,7 +4,7 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 import kotlinx.serialization.json.*
 
-class Repository(private val api: SupabaseClient = SupabaseClient()) {
+class Repository(private val api: PhpAdminClient = PhpAdminClient()) {
     private fun s(o: JsonObject, vararg keys: String): String? = keys.asSequence()
         .mapNotNull { o[it]?.jsonPrimitive?.contentOrNull }
         .firstOrNull()
@@ -164,14 +164,14 @@ class Repository(private val api: SupabaseClient = SupabaseClient()) {
     }}
 
     suspend fun setting(key: String): Result<JsonElement?> = runCatching { withContext(Dispatchers.IO) {
-        val rows = array(api.get("site_settings", "?select=value&key=eq.${java.net.URLEncoder.encode(key, "UTF-8")}"))
+        val rows = array(api.get("site_settings", "?select=value&key=eq.${key}"))
         rows.firstOrNull()?.jsonObject?.get("value")
     }}
 
     suspend fun saveSetting(key: String, value: JsonElement): Result<Unit> = runCatching { withContext(Dispatchers.IO) {
         val body = buildJsonObject { put("key", key); put("value", value) }
-        api.patch("site_settings", "key=eq.${java.net.URLEncoder.encode(key, "UTF-8")}", buildJsonObject { put("value", value) }.toString())
-        val check = array(api.get("site_settings", "?select=key&key=eq.${java.net.URLEncoder.encode(key, "UTF-8")}"))
+        api.patch("site_settings", "key=eq.${key}", buildJsonObject { put("value", value) }.toString())
+        val check = array(api.get("site_settings", "?select=key&key=eq.${key}"))
         if (check.isEmpty()) api.post("site_settings", body.toString())
         Unit
     }}
@@ -285,13 +285,12 @@ class Repository(private val api: SupabaseClient = SupabaseClient()) {
 
     suspend fun signInAdmin(email: String, password: String): Result<AdminSession> = runCatching { withContext(Dispatchers.IO) {
         val res = Json.parseToJsonElement(api.signIn(email, password)).jsonObject
-        val token = res["access_token"]?.jsonPrimitive?.contentOrNull ?: throw IllegalStateException(res["msg"]?.jsonPrimitive?.contentOrNull ?: "লগইন ব্যর্থ হয়েছে")
-        val user = res["user"]?.jsonObject ?: throw IllegalStateException("Supabase user তথ্য পাওয়া যায়নি")
-        val userId = user["id"]?.jsonPrimitive?.contentOrNull ?: throw IllegalStateException("User ID পাওয়া যায়নি")
-        val profiles = array(api.getWithBearer("profiles", "?select=role&id=eq.$userId", token))
-        val role = profiles.firstOrNull()?.jsonObject?.get("role")?.jsonPrimitive?.contentOrNull ?: "customer"
-        if (role != "admin") throw IllegalStateException("এই অ্যাকাউন্টটি Admin নয়। profiles.role = admin করুন।")
-        AdminSession(token, res["refresh_token"]?.jsonPrimitive?.contentOrNull, userId, user["email"]?.jsonPrimitive?.contentOrNull ?: email)
+        val token = res["access_token"]?.jsonPrimitive?.contentOrNull
+            ?: throw IllegalStateException(res["message"]?.jsonPrimitive?.contentOrNull ?: "লগইন ব্যর্থ হয়েছে")
+        val userId = res["user_id"]?.jsonPrimitive?.contentOrNull
+            ?: throw IllegalStateException("Admin user ID পাওয়া যায়নি")
+        val userEmail = res["email"]?.jsonPrimitive?.contentOrNull ?: email
+        AdminSession(token, null, userId, userEmail)
     }}
 
     private fun slug(value: String): String = value.lowercase().trim().replace(Regex("[^a-z0-9\\u0980-\\u09FF]+"), "-").trim('-').ifBlank { "item" }

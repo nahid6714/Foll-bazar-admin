@@ -82,7 +82,7 @@ fun LoginScreen(onLoggedIn: () -> Unit) {
 
             Spacer(Modifier.height(12.dp))
             Text(
-                "শুধু Supabase Auth ইউজার নয়—এই ইউজারের profiles.role = admin হতে হবে।",
+                "এই লগইনটি Fol Bazar PHP/MySQL Admin API-এর admin account-এর জন্য।",
                 style = MaterialTheme.typography.bodySmall,
                 color = MaterialTheme.colorScheme.onSurfaceVariant
             )

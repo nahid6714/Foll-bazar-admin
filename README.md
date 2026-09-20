@@ -1,100 +1,70 @@
-# ফল বাজার Admin — Full Control Panel v31
+# ফল বাজার Admin — PHP/MySQL Sync Update
 
-This version turns the Android app into the main admin control panel for the Supabase-backed fruit shop.
+এই আপডেটে Admin Android app-এর UI/feature structure আগের মতো রাখা হয়েছে, কিন্তু data/backend connection বর্তমান Fol Bazar website-এর PHP + MySQL architecture-এর সাথে sync করা হয়েছে।
 
-## Included
-- Supabase Auth + `profiles.role == admin` login gate
-- Products: add / edit / delete, stock, price, old price, description, category, Cloudinary image, active, featured, flash-sale, hot-deal
+## Current sync target
+- Website data source: PHP API + MySQL (`foll_bazar`)
+- Admin data source: the same PHP API + MySQL
+- Product/category/variant/order/customer/complaint/coupon/banner/site-setting data একই database থেকে আসবে
+- Product gallery URL এবং existing image flow আপাতত Cloudinary-তেই রাখা হয়েছে
+- Supabase runtime dependency Android Admin থেকে সরানো হয়েছে
+
+## Included features
+- Admin login/session
+- Products: add / edit / delete, stock, price, old price, description, category, image, gallery, active, featured, flash-sale, hot-deal
 - Categories: add / edit / delete / active state
-- Product variants table support in the repository
-- Orders: all orders, customer/address/payment details, order status and payment status
-- Customers: profiles list and role management
-- Complaints: status + admin note
-- Coupons: percent/fixed discount, minimum order, maximum discount, usage limit, active state
-- Wishlist summary: product-wise wishlist counts
-- Dashboard: product/order/customer/pending/delivered-sales/complaint counts
-- No Supabase service-role/secret key in the APK
+- Product variants
+- Orders + order items + status/payment status
+- Customers + role management
+- Complaints + admin note/status
+- Coupons
+- Wishlist summary
+- Site banners
+- Site settings
+- Dashboard
+- Existing Cloudinary upload flow
+- Existing app update / APK updater UI
 
-## Important: database setup
-Run `supabase/ADMIN_SETUP.sql` in the Supabase SQL Editor once. It adds the missing admin authorization policies and the coupon/wishlist/site-settings tables.
+## Backend setup
+The ZIP contains:
+- `backend/api/admin.php` — Admin API endpoint
+- `backend/sql/admin_users.sql` — admin account/session tables
+- `backend/tools/create_admin.php` — first admin account creator
 
-The current product schema is the schema from `mousum-bazar-supabase-schema.sql`:
-- `products.name`
-- `products.slug`
-- `products.category_id`
-- `products.stock_quantity`
-- `products.image_url`
-- `products.is_active`
-- `products.is_featured`
-- `products.is_flash_sale`
-- `products.is_hot_deal`
+Place `admin.php` under the existing PHP backend's `/api/` directory. Run `admin_users.sql` once in the same `foll_bazar` database, then create an admin account with the PHP CLI script.
 
-The previous Admin v12 app was querying the old names `category`, `stock`, `title`; that caused the 400 schema-cache error. v13 now uses the current schema.
+The script expects the existing backend `config/config.php`. If your backend is `C:\Foll-Bazar\backend`, keep the same database config already used by the website API.
 
-Only run `supabase/PRODUCT_SCHEMA_FIX.sql` if your live database is actually missing the new product columns. Do not run it blindly on an already-correct schema.
+## Local Android emulator
+Default debug API:
 
-## Admin account
-1. Create/sign in the user in Supabase Auth.
-2. Make that user's `public.profiles.role` equal to `admin`.
-3. Run `ADMIN_SETUP.sql` before using CRUD.
+`http://10.0.2.2:8080/api`
 
-The app uses the user's JWT for every database request, and the database RLS policies are the final authorization layer.
+`10.0.2.2` points the Android emulator to the host PC. Start the local PHP backend first:
+
+```text
+cd C:\Foll-Bazar\backend
+C:\xampp\php\php.exe -S 127.0.0.1:8080 -t .
+```
+
+For a physical phone, set `ADMIN_API_BASE_URL` in `local.properties` to the PC LAN address. For cPanel release, set it to the real HTTPS API URL.
+
+## Admin login
+The Admin app no longer uses Supabase Auth. The PHP API creates an opaque admin session token after verifying the dedicated `admin_users` password hash.
+
+Do not put the MySQL password, PHP secret, or Cloudinary API secret in the APK.
 
 ## Cloudinary
-The APK uses an unsigned upload preset. No Cloudinary API secret is stored in the app.
+Cloudinary is intentionally **not** migrated in this update. The existing unsigned upload preset remains active so the Admin app and current website continue to use the same image URLs. The Cloudinary-to-cPanel storage migration can be done later as a separate synchronized update.
 
-## GitHub Actions
-The existing release workflow can build and publish the APK. Required values remain:
-- `SUPABASE_URL`
-- `SUPABASE_PUBLISHABLE_KEY`
+## Important migration rule
+Do not delete or disable the old Supabase project yet. It remains a backup/reference until the complete website + Admin migration is verified.
+
+## Build configuration
+`local.properties.example` contains:
+
+- `ADMIN_API_BASE_URL`
 - `CLOUDINARY_CLOUD_NAME`
 - `CLOUDINARY_UPLOAD_PRESET`
 
-For Supabase schema changes, prefer migration files / version-controlled SQL rather than repeatedly editing the production database manually.
-
-
-## In-app automatic update
-The Admin app checks a small `update.json` manifest published with the latest
-GitHub Release for `nahid6714/Fall-bazar`. This avoids using the GitHub Releases
-API for normal update checks. From **সেটিংস / App Update** an admin can check
-manually, see a newer version, download the APK with progress, and launch
-Android's installer. Android may require the app's **Install unknown apps**
-permission the first time.
-
-The automatic GitHub Actions build remains `.github/workflows/release.yml`.
-The older `release-apk.yml` is manual-only to prevent duplicate builds.
-
-
-## App icon and in-app updates
-- The launcher icon is the text-free fruit/admin logo in `app/src/main/res/drawable/app_logo.png`.
-- Settings includes GitHub Release update checking, download progress, and Android installer launch.
-- For updates to install over an existing APK, every release must use the same signing key.
-- The automatic `release.yml` workflow therefore requires `KEYSTORE_BASE64`, `KEYSTORE_STORE_PASSWORD`, and `KEYSTORE_KEY_PASSWORD` GitHub Actions secrets; the workflow detects the keystore alias automatically.
-
-## APK updater safety
-The Admin app checks `update.json` from the latest GitHub Release instead of the GitHub Releases API. Before opening Android's installer, the downloaded APK is checked for a valid APK container, the expected package name/version, and a matching signing certificate with the installed app. Every updateable release must use the same `KEYSTORE_BASE64`, `KEYSTORE_STORE_PASSWORD`, `KEYSTORE_KEY_PASSWORD`, and `KEYSTORE_KEY_ALIAS` GitHub Secrets.
-
-
-### Current Fol Bazar Cloudinary configuration
-- Cloud name: `bak9nabq`
-- Unsigned upload preset: `bak9nabq`
-- Asset folder: `fol_bazar_products` (configured in Cloudinary preset; the app does not use this as the preset name)
-
-### Supabase schema alignment
-The admin app is aligned with the current public schema: products use `name`, `stock_quantity`, `category_id`, `image_url`, `is_active`; categories use `is_active`; variants use `weight_grams`, `stock_quantity`, `is_active`; coupons use `title`, `min_order`, and `discount_type` values `percent`/`fixed`; orders expose payment sender number, TrxID, coupon, shipping and notes.
-
-
-## v28 Variant Management
-- Added Admin UI for product sizes/variants (e.g. 500g, 1kg, 2kg).
-- Admin can add, edit, delete, activate/deactivate variants.
-- Variant fields: label, weight_grams, price, old_price, stock_quantity, sort_order.
-- Uses the existing `product_variants` Supabase table; no schema change required.
-
-
-## v31 UI updates
-- Dashboard now links directly to every admin section.
-- Dashboard bottom refresh button removed; pull-to-refresh remains available.
-- Global top-bar logout removed; logout is available from Settings.
-- Customers page now lists all profiles with search/filter by name, phone, or Gmail, user detail view, copy actions, and phone dial action.
-- Customer detail includes available profile address and account metadata.
-- Order detail includes quick call/copy actions for the customer phone.
+The old Supabase URL/key are no longer needed by the Android Admin runtime.

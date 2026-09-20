@@ -3,7 +3,7 @@ package com.folbazar.admin.data
 import android.content.Context
 import androidx.core.content.edit
 
-/** Holds the current Supabase Auth session in memory and persists it to SharedPreferences
+/** Holds the current PHP admin API session in memory and persists it to SharedPreferences
  *  so the admin stays logged in between app launches. */
 object Session {
     private const val PREFS = "folbazar_session"

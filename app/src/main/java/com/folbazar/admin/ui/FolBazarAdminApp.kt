@@ -156,7 +156,7 @@ fun FolBazarAdminApp() {
             DashboardShortcut("সেটিংস", Icons.Default.Settings, Modifier.weight(1f)) { nav.navigate("settings") { launchSingleTop = true } }
         } }
         item { DashboardShortcut("ব্যানার", Icons.Default.Image, Modifier.fillMaxWidth()) { nav.navigate("banners") { launchSingleTop = true } } }
-        error?.let { item { Text("Supabase: $it", color=MaterialTheme.colorScheme.error) } }
+        error?.let { item { Text("API: $it", color=MaterialTheme.colorScheme.error) } }
     }
 }
 
@@ -1923,7 +1923,7 @@ private fun Banners() {
         Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
             Column(Modifier.weight(1f)) {
                 Text("ওয়েবসাইট ব্যানার", style = MaterialTheme.typography.headlineSmall, fontWeight = FontWeight.Bold)
-                Text("Hero ও Promo banner সরাসরি Supabase থেকে নিয়ন্ত্রণ করুন", style = MaterialTheme.typography.bodySmall)
+                Text("Hero ও Promo banner সরাসরি Fol Bazar API থেকে নিয়ন্ত্রণ করুন", style = MaterialTheme.typography.bodySmall)
             }
             Button(onClick = { selected = null; showEditor = true }) { Icon(Icons.Default.Add, null); Spacer(Modifier.width(4.dp)); Text("যোগ") }
         }

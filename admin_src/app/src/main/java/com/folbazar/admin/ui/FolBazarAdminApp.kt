@@ -9,14 +9,16 @@ import android.content.ClipboardManager
 import android.widget.Toast
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
+import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.border
-import androidx.compose.foundation.clip
 import androidx.compose.foundation.combinedClickable
+import androidx.compose.ui.draw.clip
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.*
 import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.*
@@ -32,9 +34,11 @@ import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.foundation.text.KeyboardOptions
-import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.text.style.TextAlign
+import androidx.compose.ui.window.Dialog
+import androidx.compose.ui.window.DialogProperties
 import androidx.navigation.NavHostController
 import androidx.navigation.compose.*
 import coil.compose.AsyncImage
@@ -42,12 +46,23 @@ import com.folbazar.admin.BuildConfig
 import com.folbazar.admin.data.*
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.delay
+import kotlinx.serialization.json.JsonPrimitive
+import kotlinx.serialization.json.jsonPrimitive
+import kotlinx.serialization.json.contentOrNull
 
 private data class NavItem(val route: String, val label: String, val icon: ImageVector)
 private val ORDER_STATUSES = listOf("pending","confirmed","processing","packed","shipped","out_for_delivery","delivered","cancelled","returned")
 private val PAYMENT_STATUSES = listOf("pending","paid","failed","refunded")
 private val CUSTOMER_ROLES = listOf("customer","reseller","seller","admin")
 private val COMPLAINT_STATUSES = listOf("open","in_review","resolved","closed","rejected")
+private val VARIANT_PRESETS = listOf(
+    250 to "২৫০ গ্রাম",
+    500 to "৫০০ গ্রাম",
+    1000 to "১ কেজি",
+    2000 to "২ কেজি",
+    3000 to "৩ কেজি",
+    5000 to "৫ কেজি"
+)
 
 @Composable
 fun FolBazarAdminApp() {
@@ -59,16 +74,23 @@ fun FolBazarAdminApp() {
         NavItem("dashboard","ড্যাশবোর্ড",Icons.Default.Dashboard),
         NavItem("products","পণ্য",Icons.Default.Inventory2),
         NavItem("orders","অর্ডার",Icons.Default.ShoppingCart),
+        NavItem("analytics","অ্যানালিটিক্স",Icons.Default.Analytics),
         NavItem("more","আরও",Icons.Default.MoreHoriz)
     )
     Scaffold(
         topBar = {
-            TopAppBar(title = { Text("ফল বাজার Admin", fontWeight = FontWeight.Bold) })
+            TopAppBar(
+                title = { Text("ফল বাজার Admin", fontWeight = FontWeight.Bold) },
+                colors = TopAppBarDefaults.topAppBarColors(
+                    containerColor = MaterialTheme.colorScheme.primary,
+                    titleContentColor = MaterialTheme.colorScheme.onPrimary
+                )
+            )
         },
         bottomBar = {
-            NavigationBar {
+            NavigationBar(containerColor = MaterialTheme.colorScheme.surface) {
                 val current = nav.currentBackStackEntryAsState().value?.destination?.route
-                items.forEach { item -> NavigationBarItem(selected = current == item.route || (item.route == "more" && current in listOf("more","categories","customers","complaints","coupons","wishlist","banners","settings")), onClick = { nav.navigate(item.route) { launchSingleTop = true } }, icon = { Icon(item.icon,null) }, label = { Text(item.label) }) }
+                items.forEach { item -> NavigationBarItem(selected = current == item.route || (item.route == "more" && current in listOf("more","categories","customers","complaints","coupons","wishlist","banners","settings","analytics")), onClick = { nav.navigate(item.route) { launchSingleTop = true } }, icon = { Icon(item.icon,null) }, label = { Text(item.label) }, colors = NavigationBarItemDefaults.colors(selectedIconColor = MaterialTheme.colorScheme.primary, selectedTextColor = MaterialTheme.colorScheme.primary, indicatorColor = MaterialTheme.colorScheme.primaryContainer)) }
             }
         }
     ) { padding ->
@@ -76,6 +98,7 @@ fun FolBazarAdminApp() {
             composable("dashboard") { Dashboard(nav) }
             composable("products") { Products() }
             composable("orders") { Orders() }
+            composable("analytics") { Analytics() }
             composable("more") { More(nav) }
             composable("categories") { Categories() }
             composable("customers") { Customers() }
@@ -133,7 +156,7 @@ fun FolBazarAdminApp() {
             DashboardShortcut("সেটিংস", Icons.Default.Settings, Modifier.weight(1f)) { nav.navigate("settings") { launchSingleTop = true } }
         } }
         item { DashboardShortcut("ব্যানার", Icons.Default.Image, Modifier.fillMaxWidth()) { nav.navigate("banners") { launchSingleTop = true } } }
-        error?.let { item { Text("Supabase: $it", color=MaterialTheme.colorScheme.error) } }
+        error?.let { item { Text("API: $it", color=MaterialTheme.colorScheme.error) } }
     }
 }
 
@@ -160,6 +183,43 @@ private fun DashboardShortcut(title: String, icon: ImageVector, modifier: Modifi
     }
 }
 
+@Composable private fun Analytics() {
+    var orders by remember { mutableStateOf<List<Order>>(emptyList()) }
+    var products by remember { mutableStateOf<List<Product>>(emptyList()) }
+    var items by remember { mutableStateOf<List<OrderItem>>(emptyList()) }
+    var goal by remember { mutableStateOf("100000") }
+    var goalInput by remember { mutableStateOf("") }
+    var error by remember { mutableStateOf<String?>(null) }
+    var refresh by remember { mutableStateOf(0) }
+    val scope = rememberCoroutineScope()
+    LaunchedEffect(refresh) {
+        val r = Repository()
+        val os = r.orders(); val ps = r.products()
+        orders = os.getOrNull().orEmpty(); products = ps.getOrNull().orEmpty()
+        val all = mutableListOf<OrderItem>()
+        orders.take(100).forEach { o -> r.orderItems(o.id).getOrNull()?.let { all += it } }
+        items = all
+        r.setting("sales_goal").getOrNull()?.jsonPrimitive?.contentOrNull?.toDoubleOrNull()?.let { goal = it.toLong().toString() }
+        error = os.exceptionOrNull()?.message ?: ps.exceptionOrNull()?.message
+    }
+    val delivered = orders.filter { it.status == "delivered" }
+    val revenue = delivered.sumOf { it.total }
+    val today = java.text.SimpleDateFormat("yyyy-MM-dd", java.util.Locale.US).format(java.util.Date())
+    val todayOrders = orders.count { it.createdAt?.take(10) == today }
+    val top = items.groupBy { it.productName }.mapValues { (_, xs) -> xs.sumOf { it.quantity } }.entries.sortedByDescending { it.value }.take(5)
+    val goalValue = goal.toDoubleOrNull() ?: 0.0
+    val progress = if (goalValue > 0) (revenue / goalValue).coerceIn(0.0, 1.0) else 0.0
+    LazyColumn(Modifier.fillMaxSize().padding(16.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
+        item { Text("সেলস অ্যানালিটিক্স", style = MaterialTheme.typography.headlineSmall, fontWeight = FontWeight.Bold); Text("আগের Admin Panel-এর dashboard analytics ও sales goal এখন Fol Bazar-এ") }
+        item { Row(Modifier.fillMaxWidth(), horizontalArrangement=Arrangement.spacedBy(10.dp)) { Stat("Delivered Sales", "৳ ${money(revenue)}", Icons.Default.Payments, Modifier.weight(1f)) {}; Stat("আজকের অর্ডার", todayOrders.toString(), Icons.Default.Today, Modifier.weight(1f)) {} } }
+        item { Card(Modifier.fillMaxWidth()) { Column(Modifier.padding(16.dp), verticalArrangement=Arrangement.spacedBy(8.dp)) { Text("মাসিক / সেলস Goal", fontWeight=FontWeight.Bold); Text("৳ ${money(revenue)} / ৳ ${money(goalValue)}"); LinearProgressIndicator(progress=progress.toFloat(), modifier=Modifier.fillMaxWidth()); Row(horizontalArrangement=Arrangement.spacedBy(8.dp), verticalAlignment=Alignment.CenterVertically) { OutlinedTextField(goalInput, {goalInput=it}, label={Text("Goal (৳)")}, keyboardOptions=KeyboardOptions(keyboardType=KeyboardType.Decimal), modifier=Modifier.weight(1f), singleLine=true); Button(onClick={ val v=goalInput.toDoubleOrNull(); if(v!=null){ goal=v.toString(); scope.launch { Repository().saveSetting("sales_goal", JsonPrimitive(v)) } } }){Text("সেভ")} } } } }
+        item { Text("Top Selling Products", style=MaterialTheme.typography.titleLarge, fontWeight=FontWeight.Bold) }
+        items(top.size) { index -> val e = top[index]; Card(Modifier.fillMaxWidth()) { Row(modifier=Modifier.fillMaxWidth().padding(14.dp), horizontalArrangement=Arrangement.SpaceBetween) { Text(e.key, modifier=Modifier.weight(1f)); Text("${e.value} pcs", fontWeight=FontWeight.Bold) } } }
+        error?.let { item { Text("ডাটা লোড সমস্যা: $it", color=MaterialTheme.colorScheme.error) } }
+        item { OutlinedButton(onClick={refresh++}, modifier=Modifier.fillMaxWidth()){Icon(Icons.Default.Refresh,null);Spacer(Modifier.width(6.dp));Text("রিফ্রেশ")} }
+    }
+}
+
 @Composable private fun More(nav:NavHostController){
     LazyColumn(Modifier.fillMaxSize().padding(16.dp),verticalArrangement=Arrangement.spacedBy(12.dp)){
         item{Text("অ্যাডমিন ম্যানেজমেন্ট",style=MaterialTheme.typography.headlineSmall,fontWeight=FontWeight.Bold);Text("ওয়েবসাইটের বাকি সব নিয়ন্ত্রণ এখান থেকে")}
@@ -168,7 +228,8 @@ private fun DashboardShortcut(title: String, icon: ImageVector, modifier: Modifi
         item{AdminAction("অভিযোগ","অভিযোগ দেখা, নোট ও status পরিবর্তন",Icons.Default.ReportProblem){nav.navigate("complaints")}}
         item{AdminAction("কুপন / ডিসকাউন্ট","coupon code, percent/fixed discount, limit",Icons.Default.LocalOffer){nav.navigate("coupons")}}
         item{AdminAction("Wishlist","কোন পণ্য কতবার wishlist হয়েছে",Icons.Default.Favorite){nav.navigate("wishlist")}}
-        item{AdminAction("ওয়েবসাইট ব্যানার","Hero/Promo banner যোগ, edit, active/off, delete ও Cloudinary image",Icons.Default.Image){nav.navigate("banners")}}
+        item{AdminAction("ওয়েবসাইট ব্যানার / ইভেন্ট","Hero, Promo ও Event banner যোগ, edit, active/off, delete ও Cloudinary image",Icons.Default.Image){nav.navigate("banners")}}
+        item{AdminAction("সেলস অ্যানালিটিক্স","Sales goal, আজকের অর্ডার, delivered revenue ও top products",Icons.Default.Analytics){nav.navigate("analytics")}}
         item{AdminAction("সেটিংস / App Update","অ্যাপ আপডেট চেক, ডাউনলোড ও ইনস্টল",Icons.Default.Settings){nav.navigate("settings")}}
         item{Text("নিরাপত্তা: database RLS policy-ই চূড়ান্ত permission; app শুধু admin JWT দিয়ে কাজ করে.",style=MaterialTheme.typography.bodySmall,color=MaterialTheme.colorScheme.onSurfaceVariant)}
     }
@@ -273,9 +334,9 @@ private fun Products() {
             initial = null,
             cats = cats,
             onDismiss = { add = false }
-        ) { n, d, pr, op, st, ci, img, f, fl, h ->
+        ) { n, d, pr, op, st, ci, img, gal, f, fl, h ->
             scope.launch {
-                Repository().addProduct(n, d, pr, op, st, ci, img, f, fl, h).fold(
+                Repository().addProduct(n, d, pr, op, st, ci, img, gal, f, fl, h).fold(
                     { add = false; refresh++ },
                     { error = it.message }
                 )
@@ -288,12 +349,12 @@ private fun Products() {
             initial = p,
             cats = cats,
             onDismiss = { edit = null }
-        ) { n, d, pr, op, st, ci, img, f, fl, h ->
+        ) { n, d, pr, op, st, ci, img, gal, f, fl, h ->
             scope.launch {
                 Repository().updateProduct(
                     p.copy(
                         name = n, description = d, price = pr, oldPrice = op,
-                        stock = st, categoryId = ci, imageUrl = img,
+                        stock = st, categoryId = ci, imageUrl = img, galleryUrls = gal,
                         featured = f, flashSale = fl, hotDeal = h
                     )
                 ).fold(
@@ -335,6 +396,7 @@ private fun VariantManagerDialog(product: Product, onDismiss: () -> Unit) {
     var error by remember { mutableStateOf<String?>(null) }
     var refresh by remember { mutableStateOf(0) }
     var add by remember { mutableStateOf(false) }
+    var quickAdd by remember { mutableStateOf(false) }
     var edit by remember { mutableStateOf<ProductVariant?>(null) }
     var del by remember { mutableStateOf<ProductVariant?>(null) }
 
@@ -347,16 +409,20 @@ private fun VariantManagerDialog(product: Product, onDismiss: () -> Unit) {
         loading = false
     }
 
-    AlertDialog(
-        onDismissRequest = onDismiss,
-        title = { Text("সাইজ / ভ্যারিয়েন্ট — ${product.name}") },
-        text = {
-            Column(Modifier.heightIn(max=520.dp).verticalScroll(rememberScrollState()), verticalArrangement=Arrangement.spacedBy(8.dp)) {
-                Text("ওয়েবসাইটে যে ৫০০ গ্রাম, ১ কেজি ইত্যাদি দেখাবে—এখান থেকেই যোগ/এডিট/ডিলিট করুন.", style=MaterialTheme.typography.bodySmall)
-                FilledTonalButton(onClick={add=true}, modifier=Modifier.fillMaxWidth()) { Icon(Icons.Default.Add,null); Spacer(Modifier.width(5.dp)); Text("নতুন সাইজ / ভ্যারিয়েন্ট") }
+    FullScreenEditorPage(
+        onDismiss = onDismiss,
+        title = "সাইজ / ভ্যারিয়েন্ট — ${product.name}",
+        confirmText = "বন্ধ",
+        onConfirm = onDismiss
+    ) {
+                Text("ওয়েবসাইটে যে ৫০০ গ্রাম, ১ কেজি ইত্যাদি দেখাবে—এখান থেকেই যোগ/এডিট/ডিলিট করুন.", style=MaterialTheme.typography.bodySmall)
+                Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                    OutlinedButton(onClick={add=true}, modifier=Modifier.weight(1f)) { Icon(Icons.Default.Add,null); Spacer(Modifier.width(5.dp)); Text("একটি সাইজ") }
+                    FilledTonalButton(onClick={quickAdd=true}, modifier=Modifier.weight(1f)) { Icon(Icons.Default.PlaylistAdd,null); Spacer(Modifier.width(5.dp)); Text("একসাথে কয়েকটি") }
+                }
                 if (loading) LinearProgressIndicator(Modifier.fillMaxWidth())
-                error?.let { Text("ডাটা লোড হয়নি: $it", color=MaterialTheme.colorScheme.error) }
-                if (!loading && variants.isEmpty()) Text("এখনও কোনো সাইজ/ভ্যারিয়েন্ট যোগ করা হয়নি.", color=MaterialTheme.colorScheme.onSurfaceVariant)
+                error?.let { Text("ডাটা লোড হয়নি: $it", color=MaterialTheme.colorScheme.error) }
+                if (!loading && variants.isEmpty()) Text("এখনও কোনো সাইজ/ভ্যারিয়েন্ট যোগ করা হয়নি.", color=MaterialTheme.colorScheme.onSurfaceVariant)
                 variants.forEach { v ->
                     Card(Modifier.fillMaxWidth()) {
                         Row(Modifier.padding(10.dp), verticalAlignment=Alignment.CenterVertically) {
@@ -370,20 +436,119 @@ private fun VariantManagerDialog(product: Product, onDismiss: () -> Unit) {
                         }
                     }
                 }
-            }
-        },
-        confirmButton={ TextButton(onClick=onDismiss) { Text("বন্ধ") } }
-    )
+    }
 
     if (add) VariantEditorDialog(null, onDismiss={add=false}, onSave={label,grams,price,oldPrice,stock,active,sortOrder ->
         scope.launch { Repository().addVariant(product.id,label,grams,price,oldPrice,stock,sortOrder).fold({add=false;refresh++},{error=it.message}) }
     })
+    if (quickAdd) QuickVariantDialog(
+        productName = product.name,
+        existingWeights = variants.map { it.weightGrams }.toSet(),
+        onDismiss = { quickAdd = false }
+    ) { stock, items, prices ->
+        scope.launch {
+            var ok = true
+            var lastError: String? = null
+            items.forEach { (grams, label) ->
+                if (ok) {
+                    Repository().addVariant(product.id, label, grams, prices[grams] ?: 0.0, null, stock, grams).fold(
+                        { },
+                        { ok = false; lastError = it.message }
+                    )
+                }
+            }
+            quickAdd = false
+            refresh++
+            if (!ok) error = lastError
+        }
+    }
     edit?.let { v -> VariantEditorDialog(v, onDismiss={edit=null}, onSave={label,grams,price,oldPrice,stock,active,sortOrder ->
         scope.launch { Repository().updateVariant(v.copy(label=label,weightGrams=grams,price=price,oldPrice=oldPrice,stock=stock,active=active,sortOrder=sortOrder)).fold({edit=null;refresh++},{error=it.message}) }
     }) }
-    del?.let { v -> Confirm("ভ্যারিয়েন্ট ডিলিট করবেন?", "${v.label} (${v.weightGrams}g) স্থায়ীভাবে মুছে যাবে.", {
+    del?.let { v -> Confirm("ভ্যারিয়েন্ট ডিলিট করবেন?", "${v.label} (${v.weightGrams}g) স্থায়ীভাবে মুছে যাবে.", {
         scope.launch { Repository().deleteVariant(v.id).fold({del=null;refresh++},{error=it.message;del=null}) }
     }, { del=null }) }
+}
+
+@Composable
+private fun QuickVariantDialog(
+    productName: String,
+    existingWeights: Set<Int>,
+    onDismiss: () -> Unit,
+    onConfirm: (stock: Int, items: List<Pair<Int, String>>, prices: Map<Int, Double>) -> Unit
+) {
+    var perKg by remember { mutableStateOf("") }
+    var stock by remember { mutableStateOf("0") }
+    var selected by remember { mutableStateOf<Set<Int>>(emptySet()) }
+    var priceOverrides by remember { mutableStateOf<Map<Int, String>>(emptyMap()) }
+    val perKgValue = perKg.toDoubleOrNull()
+
+    fun autoPrice(grams: Int): Double = (perKgValue ?: 0.0) * grams / 1000.0
+
+    FullScreenEditorPage(
+        onDismiss = onDismiss,
+        title = "একসাথে কয়েকটি সাইজ — $productName",
+        confirmText = "সিলেক্ট করা সাইজ যোগ করুন",
+        confirmEnabled = selected.isNotEmpty(),
+        onConfirm = {
+            val items = selected.sorted().map { g -> g to (VARIANT_PRESETS.firstOrNull { it.first == g }?.second ?: "${g}g") }
+            val prices = selected.associateWith { g -> priceOverrides[g]?.toDoubleOrNull() ?: autoPrice(g) }
+            onConfirm(stock.toIntOrNull() ?: 0, items, prices)
+        }
+    ) {
+                Text(
+                    "একবার প্রতি কেজি দাম দিন, নিচে থেকে যে সাইজগুলো লাগবে টিক দিন—দাম নিজে থেকেই হিসাব হয়ে যাবে। প্রয়োজনে যেকোনো সাইজের দাম আলাদা করেও বদলাতে পারবেন।",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                )
+                Field(perKg, { perKg = it }, "প্রতি কেজি দাম (৳)", KeyboardType.Decimal)
+                Field(stock, { stock = it }, "প্রতিটি সাইজে স্টক", KeyboardType.Number)
+
+                VARIANT_PRESETS.forEach { (grams, label) ->
+                    val already = existingWeights.contains(grams)
+                    val isSelected = selected.contains(grams)
+                    Card(
+                        Modifier.fillMaxWidth(),
+                        colors = CardDefaults.cardColors(
+                            containerColor = if (isSelected) MaterialTheme.colorScheme.primaryContainer
+                            else MaterialTheme.colorScheme.surfaceContainerLow
+                        )
+                    ) {
+                        Column(Modifier.padding(10.dp)) {
+                            Row(
+                                Modifier
+                                    .fillMaxWidth()
+                                    .clickable(enabled = !already) {
+                                        selected = if (isSelected) selected - grams else selected + grams
+                                    },
+                                verticalAlignment = Alignment.CenterVertically
+                            ) {
+                                Checkbox(checked = isSelected, enabled = !already, onCheckedChange = {
+                                    selected = if (it) selected + grams else selected - grams
+                                })
+                                Column(Modifier.weight(1f)) {
+                                    Text(label, fontWeight = FontWeight.SemiBold)
+                                    if (already) Text(
+                                        "ইতিমধ্যে যোগ করা আছে",
+                                        style = MaterialTheme.typography.bodySmall,
+                                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                                    )
+                                }
+                                if (isSelected) Text("৳ ${money(autoPrice(grams))}", fontWeight = FontWeight.Bold)
+                            }
+                            if (isSelected) {
+                                Spacer(Modifier.height(6.dp))
+                                Field(
+                                    priceOverrides[grams] ?: (if (perKgValue != null) money(autoPrice(grams)) else ""),
+                                    { v -> priceOverrides = priceOverrides + (grams to v) },
+                                    "এই সাইজের দাম (৳) — চাইলে বদলান",
+                                    KeyboardType.Decimal
+                                )
+                            }
+                        }
+                    }
+                }
+    }
 }
 
 @Composable
@@ -397,10 +562,12 @@ private fun VariantEditorDialog(initial: ProductVariant?, onDismiss: () -> Unit,
     var active by remember { mutableStateOf(initial?.active ?: true) }
     val parsedPrice = price.toDoubleOrNull()
     val parsedGrams = grams.toIntOrNull()
-    AlertDialog(
-        onDismissRequest=onDismiss,
-        title={Text(if(initial==null) "নতুন সাইজ / ভ্যারিয়েন্ট" else "সাইজ / ভ্যারিয়েন্ট এডিট")},
-        text={Column(Modifier.verticalScroll(rememberScrollState()), verticalArrangement=Arrangement.spacedBy(8.dp)) {
+    FullScreenEditorPage(
+        onDismiss=onDismiss,
+        title=if(initial==null) "নতুন সাইজ / ভ্যারিয়েন্ট" else "সাইজ / ভ্যারিয়েন্ট এডিট",
+        confirmEnabled=label.isNotBlank() && parsedGrams!=null && parsedGrams>0 && parsedPrice!=null && parsedPrice>=0,
+        onConfirm={onSave(label.trim(),parsedGrams?:0,parsedPrice?:0.0,oldPrice.toDoubleOrNull(),stock.toIntOrNull()?:0,active,sortOrder.toIntOrNull()?:0)}
+    ) {
             Field(label,{label=it},"লেবেল (যেমন ৫০০ গ্রাম / ১ কেজি)")
             Field(grams,{grams=it},"ওজন (গ্রাম)",KeyboardType.Number)
             Field(price,{price=it},"দাম (৳)",KeyboardType.Decimal)
@@ -408,10 +575,7 @@ private fun VariantEditorDialog(initial: ProductVariant?, onDismiss: () -> Unit,
             Field(stock,{stock=it},"স্টক",KeyboardType.Number)
             Field(sortOrder,{sortOrder=it},"সাজানোর ক্রম",KeyboardType.Number)
             SwitchRow("Active",active){active=it}
-        }},
-        confirmButton={TextButton(enabled=label.isNotBlank() && parsedGrams!=null && parsedGrams>0 && parsedPrice!=null && parsedPrice>=0,onClick={onSave(label.trim(),parsedGrams?:0,parsedPrice?:0.0,oldPrice.toDoubleOrNull(),stock.toIntOrNull()?:0,active,sortOrder.toIntOrNull()?:0)}){Text("সেভ")}},
-        dismissButton={TextButton(onClick=onDismiss){Text("বাতিল")}}
-    )
+    }
 }
 
 @Composable
@@ -481,7 +645,7 @@ private fun ProductDialog(
     initial: Product?,
     cats: List<Category>,
     onDismiss: () -> Unit,
-    onSave: (String, String?, Double, Double?, Int, String?, String?, Boolean, Boolean, Boolean) -> Unit
+    onSave: (String, String?, Double, Double?, Int, String?, String?, List<String>, Boolean, Boolean, Boolean) -> Unit
 ) {
     val context = LocalContext.current
     val scope = rememberCoroutineScope()
@@ -492,7 +656,9 @@ private fun ProductDialog(
     var stock by remember { mutableStateOf(initial?.stock?.toString() ?: "0") }
     var cat by remember { mutableStateOf(initial?.categoryId) }
     var image by remember { mutableStateOf(initial?.imageUrl) }
-    var galleryUrls by remember { mutableStateOf(listOfNotNull(initial?.imageUrl)) }
+    var galleryUrls by remember { mutableStateOf(
+        (initial?.galleryUrls?.takeIf { it.isNotEmpty() } ?: listOfNotNull(initial?.imageUrl)).distinct()
+    ) }
     var featured by remember { mutableStateOf(initial?.featured ?: false) }
     var flash by remember { mutableStateOf(initial?.flashSale ?: false) }
     var hot by remember { mutableStateOf(initial?.hotDeal ?: false) }
@@ -545,26 +711,31 @@ private fun ProductDialog(
     }
 
     val parsedPrice = price.toDoubleOrNull()
-    AlertDialog(
-        onDismissRequest = onDismiss,
-        title = {
-            Column {
-                Text(
-                    if (initial == null) "নতুন পণ্য" else "পণ্য এডিট",
-                    fontWeight = FontWeight.Bold
-                )
+    FullScreenEditorPage(
+        onDismiss = onDismiss,
+        title = if (initial == null) "নতুন পণ্য" else "পণ্য এডিট",
+        confirmEnabled = !uploading && name.isNotBlank() && parsedPrice != null,
+        onConfirm = {
+            onSave(
+                name.trim(),
+                desc.trim().ifBlank { null },
+                parsedPrice ?: 0.0,
+                old.toDoubleOrNull(),
+                stock.toIntOrNull() ?: 0,
+                cat,
+                image ?: galleryUrls.firstOrNull(),
+                galleryUrls,
+                featured,
+                flash,
+                hot
+            )
+        }
+    ) {
                 Text(
                     if (initial == null) "পণ্যের তথ্য ও ছবি"
-                    else "এখান থেকেই সাইজ / ভ্যারিয়েন্টও নিয়ন্ত্রণ করুন",
+                    else "এখান থেকেই সাইজ / ভ্যারিয়েন্টও নিয়ন্ত্রণ করুন",
                     style = MaterialTheme.typography.bodySmall
                 )
-            }
-        },
-        text = {
-            Column(
-                Modifier.heightIn(max = 620.dp).verticalScroll(rememberScrollState()),
-                verticalArrangement = Arrangement.spacedBy(10.dp)
-            ) {
                 Field(name, { name = it }, "পণ্যের নাম")
                 Field(price, { price = it }, "মূল দাম (৳)", KeyboardType.Decimal)
                 Field(old, { old = it }, "পুরনো দাম (৳)", KeyboardType.Decimal)
@@ -585,27 +756,14 @@ private fun ProductDialog(
                     }
                 }
 
-                AdminImageControl(
-                    imageUrl = image ?: "",
-                    onImageUrlChange = { value ->
-                        val oldImage = image
-                        image = value.ifBlank { null }
-                        if (value.isBlank() && oldImage != null) {
-                            galleryUrls = galleryUrls.filterNot { it == oldImage }
-                        }
-                    },
-                    label = "প্রধান পণ্যের ছবি",
-                    height = 180.dp,
-                    onUpload = { uri -> CloudinaryClient(context).uploadImage(uri) }
-                )
-
+                var urlInput by remember { mutableStateOf("") }
                 Text(
-                    "অতিরিক্ত ছবি",
+                    "পণ্যের ছবি",
                     style = MaterialTheme.typography.titleMedium,
                     fontWeight = FontWeight.Bold
                 )
                 Text(
-                    "একসাথে একাধিক ছবি নির্বাচন করা যাবে। ছবির উপর চেপে ধরে রাখলে URL কপি হবে।",
+                    "একটার বেশি ছবি একসাথে যোগ করা যাবে। প্রথম/main ছবি নির্বাচন করতে ছবির উপর ট্যাপ করুন, মুছতে ✕ চাপুন।",
                     style = MaterialTheme.typography.bodySmall,
                     color = MaterialTheme.colorScheme.onSurfaceVariant
                 )
@@ -619,7 +777,11 @@ private fun ProductDialog(
                                     contentDescription = "Product image",
                                     modifier = Modifier
                                         .fillMaxSize()
-                                        .border(1.dp, MaterialTheme.colorScheme.outline, RoundedCornerShape(4.dp))
+                                        .border(
+                                            if (url == image) 3.dp else 1.dp,
+                                            if (url == image) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.outline,
+                                            MaterialTheme.shapes.small
+                                        )
                                         .combinedClickable(
                                             onClick = { image = url },
                                             onLongClick = { copyImageLink(context, url) }
@@ -638,6 +800,32 @@ private fun ProductDialog(
                             }
                         }
                     }
+                } else {
+                    Box(
+                        Modifier
+                            .fillMaxWidth()
+                            .height(90.dp)
+                            .border(1.dp, MaterialTheme.colorScheme.outline, MaterialTheme.shapes.medium),
+                        contentAlignment = Alignment.Center
+                    ) { Text("এখনও কোনো ছবি যোগ করা হয়নি", color = MaterialTheme.colorScheme.onSurfaceVariant) }
+                }
+
+                Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                    OutlinedTextField(
+                        value = urlInput,
+                        onValueChange = { urlInput = it },
+                        modifier = Modifier.weight(1f),
+                        label = { Text("Image URL") },
+                        singleLine = true
+                    )
+                    IconButton(onClick = {
+                        val u = urlInput.trim()
+                        if (u.isNotBlank() && u !in galleryUrls) {
+                            galleryUrls = galleryUrls + u
+                            if (image.isNullOrBlank()) image = u
+                        }
+                        urlInput = ""
+                    }, enabled = urlInput.isNotBlank()) { Icon(Icons.Default.Add, "যোগ") }
                 }
 
                 OutlinedButton(
@@ -647,7 +835,7 @@ private fun ProductDialog(
                 ) {
                     Icon(Icons.Default.AddPhotoAlternate, null)
                     Spacer(Modifier.width(6.dp))
-                    Text(if (uploading) "ছবি আপলোড হচ্ছে…" else "একাধিক ছবি আপলোড")
+                    Text(if (uploading) "ছবি আপলোড হচ্ছে…" else "ছবি নির্বাচন / আপলোড")
                 }
 
                 if (initial != null) {
@@ -723,29 +911,7 @@ private fun ProductDialog(
                 SwitchRow("Flash sale", flash) { flash = it }
                 SwitchRow("Hot deal", hot) { hot = it }
                 formError?.let { Text(it, color = MaterialTheme.colorScheme.error) }
-            }
-        },
-        confirmButton = {
-            TextButton(
-                enabled = !uploading && name.isNotBlank() && parsedPrice != null,
-                onClick = {
-                    onSave(
-                        name.trim(),
-                        desc.trim().ifBlank { null },
-                        parsedPrice ?: 0.0,
-                        old.toDoubleOrNull(),
-                        stock.toIntOrNull() ?: 0,
-                        cat,
-                        image,
-                        featured,
-                        flash,
-                        hot
-                    )
-                }
-            ) { Text("সেভ") }
-        },
-        dismissButton = { TextButton(onClick = onDismiss) { Text("বাতিল") } }
-    )
+    }
 
     if (addVariant && initial != null) {
         VariantEditorDialog(
@@ -807,8 +973,6 @@ private fun ProductDialog(
 }
 
 
-private val AdminControlButtonShape = RoundedCornerShape(10.dp)
-
 @Composable
 private fun AdminImageControl(
     imageUrl: String,
@@ -846,7 +1010,7 @@ private fun AdminImageControl(
             modifier = Modifier
                 .fillMaxWidth()
                 .height(height)
-                .border(2.dp, MaterialTheme.colorScheme.primary, RoundedCornerShape(4.dp))
+                .border(2.dp, MaterialTheme.colorScheme.primary, MaterialTheme.shapes.medium)
                 .padding(6.dp),
             contentAlignment = Alignment.Center
         ) {
@@ -864,12 +1028,11 @@ private fun AdminImageControl(
                 }
             }
         }
-        Column(Modifier.fillMaxWidth(), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+        Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
             OutlinedButton(
                 onClick = { picker.launch("image/*") },
-                modifier = Modifier.fillMaxWidth(),
-                enabled = !uploading,
-                shape = AdminControlButtonShape
+                modifier = Modifier.weight(1f),
+                enabled = !uploading
             ) {
                 Icon(Icons.Default.AddPhotoAlternate, null)
                 Spacer(Modifier.width(5.dp))
@@ -877,9 +1040,8 @@ private fun AdminImageControl(
             }
             OutlinedButton(
                 onClick = { onImageUrlChange("") },
-                modifier = Modifier.fillMaxWidth(),
+                modifier = Modifier.weight(1f),
                 enabled = imageUrl.isNotBlank() && !uploading,
-                shape = AdminControlButtonShape,
                 colors = ButtonDefaults.outlinedButtonColors(contentColor = MaterialTheme.colorScheme.error)
             ) {
                 Icon(Icons.Default.Delete, null)
@@ -896,61 +1058,99 @@ private fun AdminImageControl(
 }
 
 @Composable
+private fun FullScreenEditorPage(
+    onDismiss: () -> Unit,
+    title: String,
+    confirmText: String = "সেভ",
+    confirmEnabled: Boolean = true,
+    dismissText: String = "বাতিল",
+    onConfirm: () -> Unit,
+    content: @Composable ColumnScope.() -> Unit
+) {
+    Dialog(
+        onDismissRequest = onDismiss,
+        properties = DialogProperties(usePlatformDefaultWidth = false, dismissOnBackPress = true, dismissOnClickOutside = false)
+    ) {
+        Surface(modifier = Modifier.fillMaxSize(), color = MaterialTheme.colorScheme.background) {
+            Column(Modifier.fillMaxSize()) {
+                Row(
+                    Modifier.fillMaxWidth().padding(horizontal = 4.dp, vertical = 6.dp),
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    IconButton(onClick = onDismiss) { Icon(Icons.Default.ArrowBack, "ফিরে যান") }
+                    Text(
+                        title,
+                        style = MaterialTheme.typography.titleLarge,
+                        fontWeight = FontWeight.Bold,
+                        modifier = Modifier.weight(1f)
+                    )
+                }
+                HorizontalDivider()
+                Column(
+                    Modifier
+                        .weight(1f)
+                        .fillMaxWidth()
+                        .verticalScroll(rememberScrollState())
+                        .padding(16.dp),
+                    verticalArrangement = Arrangement.spacedBy(10.dp),
+                    content = content
+                )
+                HorizontalDivider()
+                Row(
+                    Modifier.fillMaxWidth().padding(12.dp),
+                    horizontalArrangement = Arrangement.End
+                ) {
+                    TextButton(onClick = onDismiss) { Text(dismissText) }
+                    Spacer(Modifier.width(8.dp))
+                    Button(enabled = confirmEnabled, onClick = onConfirm) { Text(confirmText) }
+                }
+            }
+        }
+    }
+}
+
+@Composable
 private fun CategoryEditorDialog(
     initial: Category?,
     onDismiss: () -> Unit,
     onSave: (String, String?, String?, Int) -> Unit
 ) {
+    val context = LocalContext.current
     var name by remember { mutableStateOf(initial?.name ?: "") }
     var description by remember { mutableStateOf(initial?.description ?: "") }
     var imageUrl by remember { mutableStateOf(initial?.imageUrl ?: "") }
     var sortOrder by remember { mutableStateOf(initial?.sortOrder?.toString() ?: "0") }
 
-    AlertDialog(
-        onDismissRequest = onDismiss,
-        title = { Text(if (initial == null) "নতুন ক্যাটাগরি" else "ক্যাটাগরি এডিট") },
-        text = {
-            Column(
-                Modifier
-                    .heightIn(max = 480.dp)
-                    .verticalScroll(rememberScrollState()),
-                verticalArrangement = Arrangement.spacedBy(10.dp)
-            ) {
-                Field(name, { name = it }, "ক্যাটাগরির নাম")
-                Field(description, { description = it }, "বিবরণ", single = false)
-                AdminImageControl(
-                    imageUrl = imageUrl,
-                    onImageUrlChange = { imageUrl = it },
-                    label = "ক্যাটাগরির ছবি",
-                    height = 150.dp,
-                    onUpload = { uri -> CloudinaryClient(LocalContext.current).uploadImage(uri) }
-                )
-                Field(sortOrder, { sortOrder = it }, "Sort order", KeyboardType.Number)
-                Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.End) {
-                    Text(
-                        if (initial?.active == false) "বর্তমান অবস্থা: Off" else "বর্তমান অবস্থা: Active",
-                        style = MaterialTheme.typography.bodySmall
-                    )
-                }
-            }
-        },
-        confirmButton = {
-            TextButton(
-                enabled = name.isNotBlank(),
-                onClick = {
-                    onSave(
-                        name.trim(),
-                        description.trim().ifBlank { null },
-                        imageUrl.trim().ifBlank { null },
-                        sortOrder.toIntOrNull() ?: 0
-                    )
-                }
-            ) { Text("সেভ") }
-        },
-        dismissButton = {
-            TextButton(onClick = onDismiss) { Text("বাতিল") }
+    FullScreenEditorPage(
+        onDismiss = onDismiss,
+        title = if (initial == null) "নতুন ক্যাটাগরি" else "ক্যাটাগরি এডিট",
+        confirmEnabled = name.isNotBlank(),
+        onConfirm = {
+            onSave(
+                name.trim(),
+                description.trim().ifBlank { null },
+                imageUrl.trim().ifBlank { null },
+                sortOrder.toIntOrNull() ?: 0
+            )
         }
-    )
+    ) {
+        Field(name, { name = it }, "ক্যাটাগরির নাম")
+        Field(description, { description = it }, "বিবরণ", single = false)
+        AdminImageControl(
+            imageUrl = imageUrl,
+            onImageUrlChange = { imageUrl = it },
+            label = "ক্যাটাগরির ছবি",
+            height = 150.dp,
+            onUpload = { uri -> CloudinaryClient(context).uploadImage(uri) }
+        )
+        Field(sortOrder, { sortOrder = it }, "Sort order", KeyboardType.Number)
+        Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.End) {
+            Text(
+                if (initial?.active == false) "বর্তমান অবস্থা: Off" else "বর্তমান অবস্থা: Active",
+                style = MaterialTheme.typography.bodySmall
+            )
+        }
+    }
 }
 
 
@@ -1050,25 +1250,67 @@ private fun OrderDetailsDialog(
     onSave: (String, String) -> Unit
 ) {
     val context = LocalContext.current
+    val scope = rememberCoroutineScope()
     var status by remember { mutableStateOf(o.status) }
     var pay by remember { mutableStateOf(o.paymentStatus) }
+    var items by remember { mutableStateOf<List<OrderItem>>(emptyList()) }
+    var itemsLoading by remember { mutableStateOf(true) }
+    var cats by remember { mutableStateOf<List<Category>>(emptyList()) }
+    var viewProduct by remember { mutableStateOf<Product?>(null) }
+    var productLoadingId by remember { mutableStateOf<String?>(null) }
+    var productError by remember { mutableStateOf<String?>(null) }
 
-    AlertDialog(
-        onDismissRequest = onDismiss,
-        title = {
-            Column(verticalArrangement = Arrangement.spacedBy(2.dp)) {
-                Text("অর্ডার #${o.orderNumber}", fontWeight = FontWeight.Bold)
+    LaunchedEffect(o.id) {
+        itemsLoading = true
+        val loaded = Repository().orderItems(o.id).getOrDefault(emptyList())
+        // পুরনো/টেস্ট অর্ডারে product_id সেভ না থাকলে বা ছবি না এলে, নাম মিলিয়ে বর্তমান পণ্য তালিকা থেকে লিংক করার চেষ্টা
+        items = if (loaded.any { it.productId == null || it.imageUrl == null }) {
+            val allProducts = Repository().products().getOrDefault(emptyList())
+            loaded.map { item ->
+                if (item.productId != null && item.imageUrl != null) return@map item
+                val match = if (item.productId != null) allProducts.firstOrNull { p -> p.id == item.productId }
+                else allProducts.firstOrNull { p -> p.name.equals(item.productName, ignoreCase = true) }
+                if (match != null) item.copy(
+                    productId = item.productId ?: match.id,
+                    imageUrl = item.imageUrl ?: match.imageUrl
+                ) else item
+            }
+        } else loaded
+        itemsLoading = false
+    }
+    LaunchedEffect(Unit) {
+        cats = Repository().categories().getOrDefault(emptyList())
+    }
+
+    fun openProduct(productId: String?) {
+        if (productId == null) {
+            Toast.makeText(context, "এই আইটেমের সাথে কোনো পণ্য যুক্ত পাওয়া যায়নি (হয়তো পণ্যটি মুছে ফেলা হয়েছে)", Toast.LENGTH_SHORT).show()
+            return
+        }
+        productError = null
+        productLoadingId = productId
+        scope.launch {
+            Repository().product(productId).fold(
+                { p ->
+                    if (p != null) viewProduct = p
+                    else productError = "পণ্যটি আর পাওয়া যাচ্ছে না (মুছে ফেলা হয়েছে)"
+                },
+                { productError = it.message ?: "পণ্য লোড করা যায়নি" }
+            )
+            productLoadingId = null
+        }
+    }
+
+    FullScreenEditorPage(
+        onDismiss = onDismiss,
+        title = "অর্ডার #${o.orderNumber}",
+        confirmText = "আপডেট",
+        onConfirm = { onSave(status, pay) }
+    ) {
                 Text(
                     "${o.customer} • ${o.phone}",
                     style = MaterialTheme.typography.bodySmall
                 )
-            }
-        },
-        text = {
-            Column(
-                Modifier.heightIn(max = 600.dp).verticalScroll(rememberScrollState()),
-                verticalArrangement = Arrangement.spacedBy(10.dp)
-            ) {
                 OrderSection("দ্রুত অ্যাকশন") {
                     Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                         FilledTonalButton(
@@ -1103,11 +1345,132 @@ private fun OrderDetailsDialog(
                     InfoLine("Shipping", o.shippingMethod)
                 }
 
+                OrderSection("পণ্য তালিকা") {
+                    when {
+                        itemsLoading -> LinearProgressIndicator(Modifier.fillMaxWidth())
+                        items.isEmpty() -> Text("পণ্যের বিস্তারিত পাওয়া যায়নি", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                        else -> items.forEach { it2 ->
+                            Row(
+                                Modifier
+                                    .fillMaxWidth()
+                                    .clickable { openProduct(it2.productId) }
+                                    .padding(vertical = 6.dp),
+                                verticalAlignment = Alignment.CenterVertically
+                            ) {
+                                Box(
+                                    Modifier
+                                        .size(52.dp)
+                                        .clip(MaterialTheme.shapes.small)
+                                        .background(MaterialTheme.colorScheme.surfaceVariant),
+                                    contentAlignment = Alignment.Center
+                                ) {
+                                    if (it2.imageUrl != null) {
+                                        AsyncImage(
+                                            model = it2.imageUrl,
+                                            contentDescription = it2.productName,
+                                            modifier = Modifier.fillMaxSize(),
+                                            contentScale = ContentScale.Crop
+                                        )
+                                    } else {
+                                        Icon(Icons.Default.Image, null, tint = MaterialTheme.colorScheme.onSurfaceVariant)
+                                    }
+                                    if (productLoadingId == it2.productId) {
+                                        CircularProgressIndicator(Modifier.size(20.dp), strokeWidth = 2.dp)
+                                    }
+                                }
+                                Spacer(Modifier.width(10.dp))
+                                Column(Modifier.weight(1f)) {
+                                    Text(it2.productName + (it2.variantLabel?.takeIf { v -> v.isNotBlank() }?.let { v -> " ($v)" } ?: ""), fontWeight = FontWeight.SemiBold, style = MaterialTheme.typography.bodyMedium)
+                                    Text("${it2.quantity} × ৳${money(it2.unitPrice)}", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                                }
+                                Text("৳ ${money(it2.lineTotal)}", fontWeight = FontWeight.Bold)
+                            }
+                        }
+                    }
+                    productError?.let {
+                        Text(it, color = MaterialTheme.colorScheme.error, style = MaterialTheme.typography.bodySmall)
+                    }
+                }
+
                 OrderSection("মূল্য") {
                     InfoLine("Subtotal", "৳ ${money(o.subtotal)}")
                     InfoLine("Delivery", "৳ ${money(o.deliveryCharge)}")
                     InfoLine("Discount", "৳ ${money(o.discount)}")
                     InfoLine("Total", "৳ ${money(o.total)}", bold = true)
+                }
+
+                OrderSection("রশিদ ডাউনলোড") {
+                    Text("সাইজ বেছে নিয়ে অর্ডার রশিদ ছবি বা PDF আকারে সেভ/শেয়ার করুন", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                    var receiptSize by remember { mutableStateOf(ReceiptPaperSize.A4) }
+                    var receiptBusy by remember { mutableStateOf(false) }
+                    Row(Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()), horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                        ReceiptPaperSize.values().forEach { s ->
+                            FilterChip(
+                                selected = receiptSize == s,
+                                onClick = { receiptSize = s },
+                                label = { Text(s.label) }
+                            )
+                        }
+                    }
+                    Spacer(Modifier.height(8.dp))
+                    Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                        OutlinedButton(
+                            onClick = {
+                                val activity = OrderReceiptExporter.findActivity(context)
+                                if (activity == null) {
+                                    Toast.makeText(context, "রশিদ এক্সপোর্ট করা যায়নি", Toast.LENGTH_SHORT).show()
+                                    return@OutlinedButton
+                                }
+                                receiptBusy = true
+                                scope.launch {
+                                    try {
+                                        val file = OrderReceiptExporter.exportImage(activity, o, items, receiptSize)
+                                        OrderReceiptExporter.shareFile(context, file, "image/png")
+                                    } catch (e: Exception) {
+                                        Toast.makeText(context, "ছবি তৈরি ব্যর্থ: ${e.message}", Toast.LENGTH_SHORT).show()
+                                    } finally {
+                                        receiptBusy = false
+                                    }
+                                }
+                            },
+                            modifier = Modifier.weight(1f),
+                            enabled = !itemsLoading && !receiptBusy
+                        ) {
+                            Icon(Icons.Default.Image, null)
+                            Spacer(Modifier.width(5.dp))
+                            Text("ছবি ডাউনলোড")
+                        }
+                        OutlinedButton(
+                            onClick = {
+                                val activity = OrderReceiptExporter.findActivity(context)
+                                if (activity == null) {
+                                    Toast.makeText(context, "রশিদ এক্সপোর্ট করা যায়নি", Toast.LENGTH_SHORT).show()
+                                    return@OutlinedButton
+                                }
+                                receiptBusy = true
+                                scope.launch {
+                                    try {
+                                        val file = OrderReceiptExporter.exportPdf(activity, o, items, receiptSize)
+                                        OrderReceiptExporter.shareFile(context, file, "application/pdf")
+                                    } catch (e: Exception) {
+                                        Toast.makeText(context, "PDF তৈরি ব্যর্থ: ${e.message}", Toast.LENGTH_SHORT).show()
+                                    } finally {
+                                        receiptBusy = false
+                                    }
+                                }
+                            },
+                            modifier = Modifier.weight(1f),
+                            enabled = !itemsLoading && !receiptBusy
+                        ) {
+                            Icon(Icons.Default.PictureAsPdf, null)
+                            Spacer(Modifier.width(5.dp))
+                            Text("PDF ডাউনলোড")
+                        }
+                    }
+                    if (receiptBusy) {
+                        Spacer(Modifier.height(6.dp))
+                        LinearProgressIndicator(Modifier.fillMaxWidth())
+                    }
                 }
 
                 OrderSection("পেমেন্ট") {
@@ -1129,17 +1492,28 @@ private fun OrderDetailsDialog(
                     Text("Payment status", fontWeight = FontWeight.SemiBold)
                     SimpleChoice(pay, PAYMENT_STATUSES) { pay = it }
                 }
+    }
+
+    viewProduct?.let { p ->
+        ProductDialog(
+            initial = p,
+            cats = cats,
+            onDismiss = { viewProduct = null }
+        ) { n, d, pr, op, st, ci, img, gal, f, fl, h ->
+            scope.launch {
+                Repository().updateProduct(
+                    p.copy(
+                        name = n, description = d, price = pr, oldPrice = op,
+                        stock = st, categoryId = ci, imageUrl = img, galleryUrls = gal,
+                        featured = f, flashSale = fl, hotDeal = h
+                    )
+                ).fold(
+                    { viewProduct = null },
+                    { productError = it.message }
+                )
             }
-        },
-        confirmButton = {
-            TextButton(onClick = { onSave(status, pay) }) {
-                Text("আপডেট")
-            }
-        },
-        dismissButton = {
-            TextButton(onClick = onDismiss) { Text("বন্ধ") }
         }
-    )
+    }
 }
 
 
@@ -1423,32 +1797,28 @@ private fun Customers() {
 private fun UserDetailsDialog(c: Customer, onDismiss: () -> Unit, onRoleSave: (String) -> Unit) {
     val context = LocalContext.current
     var role by remember(c.id) { mutableStateOf(c.role) }
-    AlertDialog(
-        onDismissRequest = onDismiss,
-        title = { Text("ইউজার তথ্য", fontWeight = FontWeight.Bold) },
-        text = {
-            Column(Modifier.verticalScroll(rememberScrollState()), verticalArrangement = Arrangement.spacedBy(9.dp)) {
+    FullScreenEditorPage(
+        onDismiss = onDismiss,
+        title = "ইউজার তথ্য",
+        onConfirm = { onRoleSave(role) }
+    ) {
                 UserInfoCard("ব্যক্তিগত তথ্য") {
                     CopyInfoLine("নাম", c.name, context)
                     CopyInfoLine("ফোন", c.phone, context)
                     CopyInfoLine("Gmail", c.email, context)
                     CopyInfoLine("ঠিকানা", c.address, context)
                     CopyInfoLine("User ID", c.id, context)
-                    CopyInfoLine("যোগদানের সময়", c.createdAt, context)
+                    CopyInfoLine("যোগদানের সময়", c.createdAt, context)
                 }
                 UserInfoCard("দ্রুত অ্যাকশন") {
                     Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                         if (!c.phone.isNullOrBlank()) FilledTonalButton({ dialNumber(context, c.phone) }, Modifier.weight(1f)) { Icon(Icons.Default.Call, null); Spacer(Modifier.width(5.dp)); Text("কল") }
-                        if (!c.email.isNullOrBlank()) OutlinedButton({ copyText(context, c.email, "Gmail কপি হয়েছে") }, Modifier.weight(1f)) { Icon(Icons.Default.ContentCopy, null); Spacer(Modifier.width(5.dp)); Text("Gmail কপি") }
+                        if (!c.email.isNullOrBlank()) OutlinedButton({ copyText(context, c.email, "Gmail কপি হয়েছে") }, Modifier.weight(1f)) { Icon(Icons.Default.ContentCopy, null); Spacer(Modifier.width(5.dp)); Text("Gmail কপি") }
                     }
                 }
                 Text("Role", fontWeight = FontWeight.SemiBold)
                 SimpleChoice(role, CUSTOMER_ROLES) { role = it }
-            }
-        },
-        confirmButton = { TextButton(onClick = { onRoleSave(role) }) { Text("সেভ") } },
-        dismissButton = { TextButton(onClick = onDismiss) { Text("বন্ধ") } }
-    )
+    }
 }
 
 @Composable
@@ -1553,7 +1923,7 @@ private fun Banners() {
         Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
             Column(Modifier.weight(1f)) {
                 Text("ওয়েবসাইট ব্যানার", style = MaterialTheme.typography.headlineSmall, fontWeight = FontWeight.Bold)
-                Text("Hero ও Promo banner সরাসরি Supabase থেকে নিয়ন্ত্রণ করুন", style = MaterialTheme.typography.bodySmall)
+                Text("Hero ও Promo banner সরাসরি Fol Bazar API থেকে নিয়ন্ত্রণ করুন", style = MaterialTheme.typography.bodySmall)
             }
             Button(onClick = { selected = null; showEditor = true }) { Icon(Icons.Default.Add, null); Spacer(Modifier.width(4.dp)); Text("যোগ") }
         }
@@ -1565,15 +1935,7 @@ private fun Banners() {
             items(list, key = { it.id }) { b ->
                 Card(Modifier.fillMaxWidth()) {
                     Column(Modifier.fillMaxWidth().padding(12.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                        Box(Modifier.fillMaxWidth().height(250.dp).clip(RoundedCornerShape(4.dp)), contentAlignment = Alignment.Center) {
-                            AsyncImage(
-                                model = b.imageUrl,
-                                contentDescription = b.altText,
-                                modifier = Modifier.fillMaxSize(),
-                                contentScale = ContentScale.Fit,
-                                alignment = Alignment.Center
-                            )
-                        }
+                        AsyncImage(model = b.imageUrl, contentDescription = b.altText, modifier = Modifier.fillMaxWidth().heightIn(min = 120.dp, max = 190.dp))
                         Row(verticalAlignment = Alignment.CenterVertically) {
                             Column(Modifier.weight(1f)) {
                                 Text(b.title?.ifBlank { null } ?: "ব্যানার", fontWeight = FontWeight.Bold)
@@ -1591,27 +1953,25 @@ private fun Banners() {
     }
 
     if (showEditor) {
-        BannerEditorDialog(initial = selected, onDismiss = { showEditor = false }) { bannerType, title, altText, imageUrl, linkUrl, sortOrder, active ->
+        BannerEditorDialog(initial = selected, onDismiss = { showEditor = false }) { bannerType, title, altText, imageUrl, linkUrl, sortOrder, active, widthPercent, heightPx ->
             scope.launch {
                 val repo = Repository()
                 val result = if (selected == null) {
-                    repo.addBanner(bannerType, title, altText, imageUrl, linkUrl, sortOrder)
+                    repo.addBanner(bannerType, title, altText, imageUrl, linkUrl, sortOrder, widthPercent, heightPx)
                 } else {
-                    // Keep existing stored banner dimensions untouched.
-                    repo.updateBanner(selected!!.copy(bannerType = bannerType, title = title, altText = altText, imageUrl = imageUrl, linkUrl = linkUrl, sortOrder = sortOrder, active = active))
+                    repo.updateBanner(selected!!.copy(bannerType = bannerType, title = title, altText = altText, imageUrl = imageUrl, linkUrl = linkUrl, sortOrder = sortOrder, active = active, widthPercent = widthPercent, heightPx = heightPx))
                 }
                 result.fold({ showEditor = false; refresh++ }, { error = it.message })
             }
         }
     }
-
 }
 
 @Composable
 private fun BannerEditorDialog(
     initial: SiteBanner?,
     onDismiss: () -> Unit,
-    onSave: (String, String?, String, String, String?, Int, Boolean) -> Unit
+    onSave: (String, String?, String, String, String?, Int, Boolean, Int, Int) -> Unit
 ) {
     val context = LocalContext.current
     var type by remember { mutableStateOf(initial?.bannerType ?: "hero") }
@@ -1621,9 +1981,10 @@ private fun BannerEditorDialog(
     var link by remember { mutableStateOf(initial?.linkUrl ?: "") }
     var sort by remember { mutableStateOf(initial?.sortOrder?.toString() ?: "0") }
     var active by remember { mutableStateOf(initial?.active ?: true) }
-    // The live mobile website uses the normal/default banner frame.
-    // No width/height controls are exposed in the Admin editor.
-    val livePreviewHeight = 250.dp
+    // Website ব্যানার সবসময় ফ্রেমের পুরো জায়গা নেয় (responsive), তাই ম্যানুয়াল width/height
+    // নিয়ন্ত্রণের কোনো প্রয়োজন নেই — একটা স্থির ডিফল্ট মান পাঠানো হয় ব্যাকওয়ার্ড কম্প্যাটিবিলিটির জন্য।
+    val widthPercent = 100
+    val heightPx = initial?.heightPx ?: 180
     var uploading by remember { mutableStateOf(false) }
     val uploadScope = rememberCoroutineScope()
     val picker = rememberLauncherForActivityResult(ActivityResultContracts.GetContent()) { uri ->
@@ -1639,14 +2000,18 @@ private fun BannerEditorDialog(
         }
     }
 
-    AlertDialog(
-        onDismissRequest = onDismiss,
-        title = { Text(if (initial == null) "নতুন ব্যানার" else "ব্যানার এডিট") },
-        text = {
-            Column(Modifier.heightIn(max = 560.dp).verticalScroll(rememberScrollState()), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+    FullScreenEditorPage(
+        onDismiss = onDismiss,
+        title = if (initial == null) "নতুন ব্যানার" else "ব্যানার এডিট",
+        confirmEnabled = imageUrl.isNotBlank() && sort.toIntOrNull() != null && !uploading,
+        onConfirm = {
+            onSave(type, title.trim().ifBlank { null }, alt.trim().ifBlank { "ফল বাজার ব্যানার" }, imageUrl.trim(), link.trim().ifBlank { null }, sort.toIntOrNull() ?: 0, active, widthPercent.toInt(), heightPx.toInt())
+        }
+    ) {
                 Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                     FilterChip(type == "hero", { type = "hero" }, label = { Text("Hero") })
                     FilterChip(type == "promo", { type = "promo" }, label = { Text("Promo") })
+                    FilterChip(type == "event", { type = "event" }, label = { Text("Event") })
                 }
                 Field(title, { title = it }, "Title")
                 Field(alt, { alt = it }, "Alt text")
@@ -1654,30 +2019,26 @@ private fun BannerEditorDialog(
                 Box(
                     modifier = Modifier
                         .fillMaxWidth()
-                        .border(1.dp, MaterialTheme.colorScheme.outline, RoundedCornerShape(4.dp))
+                        .border(2.dp, MaterialTheme.colorScheme.primary, MaterialTheme.shapes.large)
                         .padding(8.dp)
                 ) {
                     Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                        Text("Live Website Preview", fontWeight = FontWeight.Bold)
-                        Text(
-                            "Website-এ বর্তমানে যে frame ও crop দেখা যায়, Preview-তেও ঠিক সেটাই দেখানো হবে।",
-                            style = MaterialTheme.typography.bodySmall
-                        )
+                        Text("ব্যানার প্রিভিউ", fontWeight = FontWeight.Bold)
+                        Text("Website-এ ব্যানার সবসময় নির্ধারিত ফ্রেমের পুরো জায়গা জুড়ে responsive-ভাবে বসে; size আলাদাভাবে ঠিক করার প্রয়োজন নেই।", style = MaterialTheme.typography.bodySmall)
                         Box(
                             modifier = Modifier
                                 .fillMaxWidth()
-                                .height(livePreviewHeight)
-                                .clip(RoundedCornerShape(4.dp))
-                                .border(1.dp, MaterialTheme.colorScheme.outline, RoundedCornerShape(4.dp)),
+                                .heightIn(min = 140.dp, max = 190.dp)
+                                .border(1.dp, MaterialTheme.colorScheme.outline, MaterialTheme.shapes.medium)
+                                .padding(4.dp),
                             contentAlignment = Alignment.Center
                         ) {
                             if (imageUrl.isNotBlank()) {
                                 AsyncImage(
                                     model = imageUrl,
                                     contentDescription = alt,
-                                    modifier = Modifier.fillMaxSize(),
-                                    contentScale = ContentScale.Fit,
-                                    alignment = Alignment.Center
+                                    modifier = Modifier.fillMaxWidth().fillMaxHeight(),
+                                    contentScale = ContentScale.Fit
                                 )
                             } else {
                                 Text("ছবির Live Preview", color = MaterialTheme.colorScheme.onSurfaceVariant)
@@ -1690,28 +2051,16 @@ private fun BannerEditorDialog(
                             label = { Text("Image URL") },
                             singleLine = true
                         )
-                        Column(Modifier.fillMaxWidth(), verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                            OutlinedButton(onClick = { picker.launch("image/*") }, modifier = Modifier.fillMaxWidth(), enabled = !uploading, shape = AdminControlButtonShape) {
+                        Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                            OutlinedButton(onClick = { picker.launch("image/*") }, modifier = Modifier.weight(1f), enabled = !uploading) {
                                 Icon(Icons.Default.AddPhotoAlternate, null)
                                 Spacer(Modifier.width(4.dp))
-                                Text(if (uploading) "আপলোড…" else "ছবি নির্বাচন / আপলোড")
+                                Text(if (uploading) "আপলোড…" else "ছবি নির্বাচন")
                             }
-                            OutlinedButton(onClick = { imageUrl = "" }, modifier = Modifier.fillMaxWidth(), enabled = imageUrl.isNotBlank() && !uploading, shape = AdminControlButtonShape, colors = ButtonDefaults.outlinedButtonColors(contentColor = MaterialTheme.colorScheme.error)) {
+                            OutlinedButton(onClick = { imageUrl = "" }, modifier = Modifier.weight(1f), enabled = imageUrl.isNotBlank() && !uploading, colors = ButtonDefaults.outlinedButtonColors(contentColor = MaterialTheme.colorScheme.error)) {
                                 Icon(Icons.Default.Delete, null)
                                 Spacer(Modifier.width(4.dp))
                                 Text("ছবি মুছুন")
-                            }
-                        }
-                        Text(
-                            "Website-এর normal content width অনুযায়ী banner responsive হবে। Width/Height আলাদা করে পরিবর্তনের কোনো অপশন নেই।",
-                            style = MaterialTheme.typography.bodySmall
-                        )
-                        Card(colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceVariant)) {
-                            Column(Modifier.padding(10.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
-                                Text("প্রস্তাবিত ব্যানার সাইজ", fontWeight = FontWeight.Bold)
-                                Text("Hero: 1600 × 600 px", style = MaterialTheme.typography.bodySmall)
-                                Text("Promo: 1600 × 350 px", style = MaterialTheme.typography.bodySmall)
-                                Text("Width/Height Admin থেকে পরিবর্তন করা যাবে না; Website নিজে responsive ভাবে size নেবে।", style = MaterialTheme.typography.bodySmall)
                             }
                         }
                     }
@@ -1719,15 +2068,7 @@ private fun BannerEditorDialog(
                 Field(link, { link = it }, "Link URL (optional)")
                 Field(sort, { sort = it }, "Sort order", KeyboardType.Number)
                 SwitchRow("Active", active) { active = it }
-            }
-        },
-        confirmButton = {
-            TextButton(enabled = imageUrl.isNotBlank() && sort.toIntOrNull() != null && !uploading, onClick = {
-                onSave(type, title.trim().ifBlank { null }, alt.trim().ifBlank { "ফল বাজার ব্যানার" }, imageUrl.trim(), link.trim().ifBlank { null }, sort.toIntOrNull() ?: 0, active)
-            }) { Text("সেভ") }
-        },
-        dismissButton = { TextButton(onClick = onDismiss) { Text("বাতিল") } }
-    )
+    }
 }
 
 @Composable private fun Wishlist(){
@@ -1748,11 +2089,11 @@ private fun BannerEditorDialog(
 
 private data class CouponForm(val code:String,val title:String?,val type:String,val value:Double,val min:Double,val max:Double?,val limit:Int?,val start:String?,val end:String?)
 
-@Composable private fun CouponDialog(initial:Coupon?,onDismiss:()->Unit,onSave:(CouponForm)->Unit){var code by remember{mutableStateOf(initial?.code?:"")};var title by remember{mutableStateOf(initial?.title?:"")};var type by remember{mutableStateOf(initial?.discountType ?: "percent")};var value by remember{mutableStateOf(initial?.discountValue?.toString()?:"")};var min by remember{mutableStateOf(initial?.minOrder?.toString()?: "0")};var max by remember{mutableStateOf(initial?.maxDiscount?.toString()?: "")};var limit by remember{mutableStateOf(initial?.usageLimit?.toString()?: "")};AlertDialog(onDismissRequest=onDismiss,title={Text(if(initial==null)"নতুন কুপন" else "কুপন এডিট")},text={Column(Modifier.heightIn(max=450.dp).verticalScroll(rememberScrollState()),verticalArrangement=Arrangement.spacedBy(8.dp)){Field(code,{code=it},"কুপন কোড");Field(title,{title=it},"শিরোনাম");Row(horizontalArrangement=Arrangement.spacedBy(8.dp)){FilterChip(type=="percent",{type="percent"},label={Text("Percent")});FilterChip(type=="fixed",{type="fixed"},label={Text("Fixed")})};Field(value,{value=it},"Discount value",KeyboardType.Decimal);Field(min,{min=it},"Minimum order",KeyboardType.Decimal);Field(max,{max=it},"Maximum discount",KeyboardType.Decimal);Field(limit,{limit=it},"Usage limit",KeyboardType.Number)}},confirmButton={TextButton(enabled=code.isNotBlank()&&value.toDoubleOrNull()!=null,onClick={onSave(CouponForm(code.trim(),title.trim().ifBlank{null},type,value.toDoubleOrNull()?:0.0,min.toDoubleOrNull()?:0.0,max.toDoubleOrNull(),limit.toIntOrNull(),initial?.startsAt,initial?.expiresAt))}){Text("সেভ")}},dismissButton={TextButton(onClick=onDismiss){Text("বাতিল")}})}
+@Composable private fun CouponDialog(initial:Coupon?,onDismiss:()->Unit,onSave:(CouponForm)->Unit){var code by remember{mutableStateOf(initial?.code?:"")};var title by remember{mutableStateOf(initial?.title?:"")};var type by remember{mutableStateOf(initial?.discountType ?: "percent")};var value by remember{mutableStateOf(initial?.discountValue?.toString()?:"")};var min by remember{mutableStateOf(initial?.minOrder?.toString()?: "0")};var max by remember{mutableStateOf(initial?.maxDiscount?.toString()?: "")};var limit by remember{mutableStateOf(initial?.usageLimit?.toString()?: "")};FullScreenEditorPage(onDismiss=onDismiss,title=if(initial==null)"নতুন কুপন" else "কুপন এডিট",confirmEnabled=code.isNotBlank()&&value.toDoubleOrNull()!=null,onConfirm={onSave(CouponForm(code.trim(),title.trim().ifBlank{null},type,value.toDoubleOrNull()?:0.0,min.toDoubleOrNull()?:0.0,max.toDoubleOrNull(),limit.toIntOrNull(),initial?.startsAt,initial?.expiresAt))}){Field(code,{code=it},"কুপন কোড");Field(title,{title=it},"শিরোনাম");Row(horizontalArrangement=Arrangement.spacedBy(8.dp)){FilterChip(type=="percent",{type="percent"},label={Text("Percent")});FilterChip(type=="fixed",{type="fixed"},label={Text("Fixed")})};Field(value,{value=it},"Discount value",KeyboardType.Decimal);Field(min,{min=it},"Minimum order",KeyboardType.Decimal);Field(max,{max=it},"Maximum discount",KeyboardType.Decimal);Field(limit,{limit=it},"Usage limit",KeyboardType.Number)}}
 
 
-@Composable private fun RoleDialog(c:Customer,onDismiss:()->Unit,onSave:(String)->Unit){var role by remember{mutableStateOf(c.role)};AlertDialog(onDismissRequest=onDismiss,title={Text("${c.name} — Role")},text={SimpleChoice(role,CUSTOMER_ROLES){role=it}},confirmButton={TextButton(onClick={onSave(role)}){Text("সেভ")}},dismissButton={TextButton(onClick=onDismiss){Text("বাতিল")}})}
-@Composable private fun ComplaintDialog(c:Complaint,onDismiss:()->Unit,onSave:(String,String?)->Unit){var status by remember{mutableStateOf(c.status)};var note by remember{mutableStateOf(c.adminNote?:"")};AlertDialog(onDismissRequest=onDismiss,title={Text("অভিযোগ #${c.number}")},text={Column(Modifier.heightIn(max=450.dp).verticalScroll(rememberScrollState()),verticalArrangement=Arrangement.spacedBy(8.dp)){Text(c.description);SimpleChoice(status,COMPLAINT_STATUSES){status=it};Field(note,{note=it},"Admin note",single=false)}},confirmButton={TextButton(onClick={onSave(status,note.trim().ifBlank{null})}){Text("আপডেট")}},dismissButton={TextButton(onClick=onDismiss){Text("বন্ধ")}})}
+@Composable private fun RoleDialog(c:Customer,onDismiss:()->Unit,onSave:(String)->Unit){var role by remember{mutableStateOf(c.role)};FullScreenEditorPage(onDismiss=onDismiss,title="${c.name} — Role",onConfirm={onSave(role)}){SimpleChoice(role,CUSTOMER_ROLES){role=it}}}
+@Composable private fun ComplaintDialog(c:Complaint,onDismiss:()->Unit,onSave:(String,String?)->Unit){var status by remember{mutableStateOf(c.status)};var note by remember{mutableStateOf(c.adminNote?:"")};FullScreenEditorPage(onDismiss=onDismiss,title="অভিযোগ #${c.number}",confirmText="আপডেট",onConfirm={onSave(status,note.trim().ifBlank{null})}){Text(c.description);SimpleChoice(status,COMPLAINT_STATUSES){status=it};Field(note,{note=it},"Admin note",single=false)}}
 
 @Composable private fun SimpleChoice(selected:String,options:List<String>,onChange:(String)->Unit){var open by remember{mutableStateOf(false)};Box{OutlinedButton({open=true}){Text(selected)};DropdownMenu(open,{open=false}){options.forEach{DropdownMenuItem(text={Text(it)},onClick={onChange(it);open=false})}}}}
 @Composable private fun SwitchRow(label:String,value:Boolean,onChange:(Boolean)->Unit){Row(Modifier.fillMaxWidth(),verticalAlignment=Alignment.CenterVertically){Text(label,Modifier.weight(1f));Switch(value,onChange)}}
@@ -1922,6 +2263,20 @@ private fun SettingsScreen(onLogout: () -> Unit) {
     var message by remember { mutableStateOf<String?>(null) }
     var download by remember { mutableStateOf(DownloadState()) }
     var installedFile by remember { mutableStateOf<java.io.File?>(null) }
+    var logoUrl by remember { mutableStateOf("") }
+    var logoUploading by remember { mutableStateOf(false) }
+    val logoPicker = rememberLauncherForActivityResult(ActivityResultContracts.GetContent()) { uri ->
+        if (uri != null) {
+            logoUploading = true
+            scope.launch {
+                CloudinaryClient(context).uploadImage(uri).fold(
+                    { url -> logoUrl = url; Repository().saveSetting("logo_url", JsonPrimitive(url)) },
+                    { message = it.message ?: "লোগো আপলোড ব্যর্থ" }
+                )
+                logoUploading = false
+            }
+        }
+    }
 
     fun check() {
         if (checking) return
@@ -1947,6 +2302,7 @@ private fun SettingsScreen(onLogout: () -> Unit) {
     }
 
     LaunchedEffect(Unit) { check() }
+    LaunchedEffect(Unit) { Repository().setting("logo_url").getOrNull()?.jsonPrimitive?.contentOrNull?.let { logoUrl = it } }
 
     LazyColumn(
         Modifier.fillMaxSize().padding(16.dp),
@@ -1955,6 +2311,22 @@ private fun SettingsScreen(onLogout: () -> Unit) {
         item {
             Text("সেটিংস", style = MaterialTheme.typography.headlineSmall, fontWeight = FontWeight.Bold)
             Text("Fol Bazar Admin • বর্তমান ভার্সন ${BuildConfig.VERSION_NAME}")
+        }
+
+        item {
+            Card(Modifier.fillMaxWidth()) {
+                Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
+                    Text("ওয়েবসাইট লোগো", style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.Bold)
+                    Text("Cloudinary-তে লোগো আপলোড করে site_settings.logo_url-এ সংরক্ষণ করুন।", style = MaterialTheme.typography.bodySmall)
+                    if (logoUrl.isNotBlank()) AsyncImage(model = logoUrl, contentDescription = "Logo", modifier = Modifier.size(84.dp))
+                    Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                        OutlinedButton(onClick = { logoPicker.launch("image/*") }, enabled = !logoUploading) {
+                            Icon(Icons.Default.Image, null); Spacer(Modifier.width(6.dp)); Text(if (logoUploading) "আপলোড হচ্ছে…" else "লোগো আপলোড")
+                        }
+                        if (logoUrl.isNotBlank()) TextButton(onClick = { logoUrl = "" }) { Text("URL মুছুন") }
+                    }
+                }
+            }
         }
 
         item {
@@ -2065,6 +2437,35 @@ private fun SettingsScreen(onLogout: () -> Unit) {
                     Text("3. ডাউনলোডে চাপলে অগ্রগতি (%) দেখা যাবে।")
                     Text("4. ডাউনলোড শেষ হলে এখানেই Install বাটন আসবে।")
                     Text("5. Android-এর নিরাপত্তার কারণে প্রথমবার এই অ্যাপের জন্য 'Install unknown apps' অনুমতি লাগতে পারে।")
+                }
+            }
+        }
+        item {
+            Card(Modifier.fillMaxWidth()) {
+                Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
+                    Text("থিম", fontWeight = FontWeight.Bold)
+                    Text("অ্যাপের লুক Light / Dark / Device অনুযায়ী বেছে নিন", style = MaterialTheme.typography.bodySmall)
+                    var themeMode by remember { mutableStateOf(ThemePrefs.mode) }
+                    Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                        FilterChip(
+                            selected = themeMode == ThemePrefs.Mode.SYSTEM,
+                            onClick = { ThemePrefs.updateMode(ThemePrefs.Mode.SYSTEM); themeMode = ThemePrefs.Mode.SYSTEM },
+                            label = { Text("Device") },
+                            leadingIcon = { Icon(Icons.Default.PhoneAndroid, null) }
+                        )
+                        FilterChip(
+                            selected = themeMode == ThemePrefs.Mode.LIGHT,
+                            onClick = { ThemePrefs.updateMode(ThemePrefs.Mode.LIGHT); themeMode = ThemePrefs.Mode.LIGHT },
+                            label = { Text("Light") },
+                            leadingIcon = { Icon(Icons.Default.LightMode, null) }
+                        )
+                        FilterChip(
+                            selected = themeMode == ThemePrefs.Mode.DARK,
+                            onClick = { ThemePrefs.updateMode(ThemePrefs.Mode.DARK); themeMode = ThemePrefs.Mode.DARK },
+                            label = { Text("Dark") },
+                            leadingIcon = { Icon(Icons.Default.DarkMode, null) }
+                        )
+                    }
                 }
             }
         }

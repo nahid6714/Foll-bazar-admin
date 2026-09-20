@@ -4,7 +4,7 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 import kotlinx.serialization.json.*
 
-class Repository(private val api: SupabaseClient = SupabaseClient()) {
+class Repository(private val api: PhpAdminClient = PhpAdminClient()) {
     private fun s(o: JsonObject, vararg keys: String): String? = keys.asSequence()
         .mapNotNull { o[it]?.jsonPrimitive?.contentOrNull }
         .firstOrNull()
@@ -17,6 +17,11 @@ class Repository(private val api: SupabaseClient = SupabaseClient()) {
     private fun b(o: JsonObject, vararg keys: String): Boolean? = keys.asSequence()
         .mapNotNull { o[it]?.jsonPrimitive?.booleanOrNull }
         .firstOrNull()
+    private fun sa(o: JsonObject, vararg keys: String): List<String> = keys.asSequence()
+        .mapNotNull { o[it] as? JsonArray }
+        .firstOrNull()
+        ?.mapNotNull { it.jsonPrimitive.contentOrNull }
+        ?: emptyList()
 
     private fun parseCategory(o: JsonObject) = Category(
         id = s(o, "id") ?: "", name = s(o, "name") ?: "", slug = s(o, "slug") ?: "",
@@ -30,7 +35,7 @@ class Repository(private val api: SupabaseClient = SupabaseClient()) {
         description = s(o, "description"), price = d(o, "price") ?: 0.0,
         oldPrice = d(o, "old_price"), stock = i(o, "stock_quantity", "stock") ?: 0,
         soldQuantity = i(o, "sold_quantity") ?: 0, discountPercent = d(o, "discount_percent"),
-        imageUrl = s(o, "image_url", "image"), active = b(o, "is_active", "active") ?: true,
+        imageUrl = s(o, "image_url", "image"), galleryUrls = sa(o, "gallery_urls"), active = b(o, "is_active", "active") ?: true,
         featured = b(o, "is_featured") ?: false, flashSale = b(o, "is_flash_sale") ?: false,
         hotDeal = b(o, "is_hot_deal") ?: false, sortOrder = i(o, "sort_order") ?: 0
     )
@@ -57,6 +62,14 @@ class Repository(private val api: SupabaseClient = SupabaseClient()) {
         createdAt = s(o, "created_at")
     )
 
+    private fun parseOrderItem(o: JsonObject) = OrderItem(
+        id = s(o, "id") ?: "", orderId = s(o, "order_id") ?: "", productId = s(o, "product_id"),
+        productName = s(o, "product_name") ?: "পণ্য", variantLabel = s(o, "variant_label"),
+        weightGrams = i(o, "weight_grams"), unitPrice = d(o, "unit_price") ?: 0.0,
+        quantity = i(o, "quantity") ?: 0, lineTotal = d(o, "line_total") ?: 0.0,
+        imageUrl = s(o, "image_url") ?: (o["products"] as? JsonObject)?.let { s(it, "image_url") }
+    )
+
     private fun parseCustomer(o: JsonObject) = Customer(
         id = s(o, "id") ?: "", name = s(o, "full_name", "name") ?: s(o, "email") ?: "Customer",
         email = s(o, "email"), phone = s(o, "phone"), role = s(o, "role") ?: "customer",
@@ -80,7 +93,7 @@ class Repository(private val api: SupabaseClient = SupabaseClient()) {
         sortOrder = i(o, "sort_order") ?: 0,
         active = b(o, "is_active") ?: true,
         widthPercent = i(o, "width_percent") ?: 100,
-        heightPx = i(o, "height_px") ?: 250,
+        heightPx = i(o, "height_px") ?: 180,
         createdAt = s(o, "created_at"),
         updatedAt = s(o, "updated_at")
     )
@@ -117,6 +130,20 @@ class Repository(private val api: SupabaseClient = SupabaseClient()) {
         array(api.get("orders", "?select=*&order=created_at.desc")).map { parseOrder(it.jsonObject) }
     }}
 
+    suspend fun orderItems(orderId: String): Result<List<OrderItem>> = runCatching { withContext(Dispatchers.IO) {
+        array(api.get("order_items", "?select=*,products(image_url)&order_id=eq.$orderId")).map { parseOrderItem(it.jsonObject) }
+    }}
+
+    suspend fun product(id: String): Result<Product?> = runCatching { withContext(Dispatchers.IO) {
+        val raw = api.get("products", "?select=*,categories(name)&id=eq.$id")
+        array(raw).firstOrNull()?.let { el ->
+            val o = el.jsonObject.toMutableMap()
+            val cat = o["categories"]?.jsonObject
+            if (cat != null) o["category_name"] = cat["name"] ?: JsonNull
+            parseProduct(JsonObject(o))
+        }
+    }}
+
     suspend fun customers(): Result<List<Customer>> = runCatching { withContext(Dispatchers.IO) {
         array(api.get("profiles", "?select=id,full_name,phone,email,role,avatar_url,address,created_at,updated_at&order=created_at.desc")).map { parseCustomer(it.jsonObject) }
     }}
@@ -136,14 +163,27 @@ class Repository(private val api: SupabaseClient = SupabaseClient()) {
         array(api.get("coupons", "?select=*&order=created_at.desc")).map { parseCoupon(it.jsonObject) }
     }}
 
+    suspend fun setting(key: String): Result<JsonElement?> = runCatching { withContext(Dispatchers.IO) {
+        val rows = array(api.get("site_settings", "?select=value&key=eq.${key}"))
+        rows.firstOrNull()?.jsonObject?.get("value")
+    }}
+
+    suspend fun saveSetting(key: String, value: JsonElement): Result<Unit> = runCatching { withContext(Dispatchers.IO) {
+        val body = buildJsonObject { put("key", key); put("value", value) }
+        api.patch("site_settings", "key=eq.${key}", buildJsonObject { put("value", value) }.toString())
+        val check = array(api.get("site_settings", "?select=key&key=eq.${key}"))
+        if (check.isEmpty()) api.post("site_settings", body.toString())
+        Unit
+    }}
+
     suspend fun banners(): Result<List<SiteBanner>> = runCatching { withContext(Dispatchers.IO) {
         array(api.get("site_banners", "?select=*&order=banner_type.asc,sort_order.asc,created_at.desc")).map { parseBanner(it.jsonObject) }
     }}
 
-    suspend fun addBanner(bannerType: String, title: String?, altText: String, imageUrl: String, linkUrl: String?, sortOrder: Int): Result<SiteBanner> = runCatching { withContext(Dispatchers.IO) {
+    suspend fun addBanner(bannerType: String, title: String?, altText: String, imageUrl: String, linkUrl: String?, sortOrder: Int, widthPercent: Int, heightPx: Int): Result<SiteBanner> = runCatching { withContext(Dispatchers.IO) {
         val body = buildJsonObject {
             put("banner_type", bannerType); put("title", title); put("alt_text", altText.ifBlank { "ফল বাজার ব্যানার" });
-            put("image_url", imageUrl); put("link_url", linkUrl); put("sort_order", sortOrder); put("is_active", true)
+            put("image_url", imageUrl); put("link_url", linkUrl); put("sort_order", sortOrder); put("is_active", true); put("width_percent", widthPercent); put("height_px", heightPx)
         }
         parseBanner(array(api.post("site_banners", body.toString())).first().jsonObject)
     }}
@@ -151,7 +191,7 @@ class Repository(private val api: SupabaseClient = SupabaseClient()) {
     suspend fun updateBanner(b: SiteBanner): Result<SiteBanner> = runCatching { withContext(Dispatchers.IO) {
         val body = buildJsonObject {
             put("banner_type", b.bannerType); put("title", b.title); put("alt_text", b.altText); put("image_url", b.imageUrl);
-            put("link_url", b.linkUrl); put("sort_order", b.sortOrder); put("is_active", b.active)
+            put("link_url", b.linkUrl); put("sort_order", b.sortOrder); put("is_active", b.active); put("width_percent", b.widthPercent); put("height_px", b.heightPx)
         }
         parseBanner(array(api.patch("site_banners", "id=eq.${b.id}", body.toString())).first().jsonObject)
     }}
@@ -171,11 +211,12 @@ class Repository(private val api: SupabaseClient = SupabaseClient()) {
 
     suspend fun deleteCategory(id: String): Result<Unit> = runCatching { withContext(Dispatchers.IO) { api.delete("categories", "id=eq.$id"); Unit }}
 
-    suspend fun addProduct(name: String, description: String?, price: Double, oldPrice: Double?, stock: Int, categoryId: String?, imageUrl: String?, featured: Boolean, flash: Boolean, hot: Boolean): Result<Product> = runCatching { withContext(Dispatchers.IO) {
+    suspend fun addProduct(name: String, description: String?, price: Double, oldPrice: Double?, stock: Int, categoryId: String?, imageUrl: String?, galleryUrls: List<String>, featured: Boolean, flash: Boolean, hot: Boolean): Result<Product> = runCatching { withContext(Dispatchers.IO) {
         val slug = slug(name) + "-" + System.currentTimeMillis().toString().takeLast(6)
         val body = buildJsonObject {
             put("name", name); put("slug", slug); put("description", description); put("price", price); put("old_price", oldPrice)
             put("stock_quantity", stock); put("category_id", categoryId); put("image_url", imageUrl); put("is_active", true)
+            putJsonArray("gallery_urls") { galleryUrls.forEach { add(it) } }
             put("is_featured", featured); put("is_flash_sale", flash); put("is_hot_deal", hot)
         }
         val obj = array(api.post("products", body.toString())).first().jsonObject
@@ -186,6 +227,7 @@ class Repository(private val api: SupabaseClient = SupabaseClient()) {
         val body = buildJsonObject {
             put("name", p.name); put("description", p.description); put("price", p.price); put("old_price", p.oldPrice)
             put("stock_quantity", p.stock); put("category_id", p.categoryId); put("image_url", p.imageUrl); put("is_active", p.active)
+            putJsonArray("gallery_urls") { p.galleryUrls.forEach { add(it) } }
             put("is_featured", p.featured); put("is_flash_sale", p.flashSale); put("is_hot_deal", p.hotDeal); put("sort_order", p.sortOrder)
         }
         parseProduct(array(api.patch("products", "id=eq.${p.id}", body.toString())).first().jsonObject)
@@ -243,13 +285,12 @@ class Repository(private val api: SupabaseClient = SupabaseClient()) {
 
     suspend fun signInAdmin(email: String, password: String): Result<AdminSession> = runCatching { withContext(Dispatchers.IO) {
         val res = Json.parseToJsonElement(api.signIn(email, password)).jsonObject
-        val token = res["access_token"]?.jsonPrimitive?.contentOrNull ?: throw IllegalStateException(res["msg"]?.jsonPrimitive?.contentOrNull ?: "লগইন ব্যর্থ হয়েছে")
-        val user = res["user"]?.jsonObject ?: throw IllegalStateException("Supabase user তথ্য পাওয়া যায়নি")
-        val userId = user["id"]?.jsonPrimitive?.contentOrNull ?: throw IllegalStateException("User ID পাওয়া যায়নি")
-        val profiles = array(api.getWithBearer("profiles", "?select=role&id=eq.$userId", token))
-        val role = profiles.firstOrNull()?.jsonObject?.get("role")?.jsonPrimitive?.contentOrNull ?: "customer"
-        if (role != "admin") throw IllegalStateException("এই অ্যাকাউন্টটি Admin নয়। profiles.role = admin করুন।")
-        AdminSession(token, res["refresh_token"]?.jsonPrimitive?.contentOrNull, userId, user["email"]?.jsonPrimitive?.contentOrNull ?: email)
+        val token = res["access_token"]?.jsonPrimitive?.contentOrNull
+            ?: throw IllegalStateException(res["message"]?.jsonPrimitive?.contentOrNull ?: "লগইন ব্যর্থ হয়েছে")
+        val userId = res["user_id"]?.jsonPrimitive?.contentOrNull
+            ?: throw IllegalStateException("Admin user ID পাওয়া যায়নি")
+        val userEmail = res["email"]?.jsonPrimitive?.contentOrNull ?: email
+        AdminSession(token, null, userId, userEmail)
     }}
 
     private fun slug(value: String): String = value.lowercase().trim().replace(Regex("[^a-z0-9\\u0980-\\u09FF]+"), "-").trim('-').ifBlank { "item" }

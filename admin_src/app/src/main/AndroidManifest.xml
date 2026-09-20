@@ -6,6 +6,7 @@
         android:icon="@drawable/app_logo"
         android:roundIcon="@drawable/app_logo"
         android:label="ফল বাজার Admin"
+        android:usesCleartextTraffic="true"
         android:supportsRtl="true"
         android:theme="@style/Theme.FolBazar">
         <activity
