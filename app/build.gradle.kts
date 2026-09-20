@@ -67,10 +67,17 @@ dependencies {
 // so this both (a) deletes the legacy folder on disk before every build, and
 // (b) excludes it directly from every KotlinCompile task as a second safety net.
 val legacyExampleDir = project.file("src/main/java/com/example")
+// The PHP/MySQL migration no longer uses Supabase. Remove any stale SupabaseClient
+// left behind in an older checkout before Kotlin compilation. This is intentionally
+// a build-time cleanup so old GitHub branches cannot break the release build.
+val legacySupabaseClient = project.file("src/main/java/com/folbazar/admin/data/SupabaseClient.kt")
 tasks.matching { it.name == "preBuild" }.configureEach {
     doFirst {
         if (legacyExampleDir.exists()) {
             legacyExampleDir.deleteRecursively()
+        }
+        if (legacySupabaseClient.exists()) {
+            legacySupabaseClient.delete()
         }
     }
 }
