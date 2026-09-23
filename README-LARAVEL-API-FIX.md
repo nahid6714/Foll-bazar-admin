@@ -21,3 +21,9 @@ No Cloudinary or Supabase dependency was added.
 ## Build
 Push the updated project to `main`. GitHub Actions will build the release APK using:
 `ADMIN_API_BASE_URL=https://lakebazar.com/api`
+
+## cPanel image upload fix
+
+The Android app now uploads images to `POST https://lakebazar.com/api/upload` with the admin Sanctum Bearer token. It sends a multipart `file` plus `folder` (`products`, `categories`, `banners`, or `settings`) and reads the Laravel `{ok:true,data:{url,path}}` response.
+
+The Laravel backend should use the `uploads` filesystem disk, which stores files directly under `public/storage` on cPanel. This avoids a required `php artisan storage:link` command. Make sure `public/storage` is writable by the web server/PHP user.

@@ -22,7 +22,7 @@ class ServerStorageClient(private val context: Context) {
     private val client = OkHttpClient()
     private val baseUrl = BuildConfig.ADMIN_API_BASE_URL.trim().trimEnd('/')
 
-    suspend fun uploadImage(uri: Uri): Result<String> = runCatching {
+    suspend fun uploadImage(uri: Uri, folder: String = "products"): Result<String> = runCatching {
         val input = context.contentResolver.openInputStream(uri)
             ?: throw IllegalStateException("ছবি পড়া যায়নি")
 
@@ -40,10 +40,11 @@ class ServerStorageClient(private val context: Context) {
                     "image",
                     temp.asRequestBody(mime.toMediaType())
                 )
+                .addFormDataPart("folder", folder)
                 .build()
 
             val builder = Request.Builder()
-                .url("$baseUrl/admin.php?action=upload")
+                .url("$baseUrl/upload")
                 .post(body)
 
             Session.accessToken?.takeIf { it.isNotBlank() }?.let {
@@ -57,11 +58,14 @@ class ServerStorageClient(private val context: Context) {
                 }
                 val json = Json.parseToJsonElement(text).jsonObject
                 if (json["ok"]?.jsonPrimitive?.booleanOrNull != true) {
-                    throw IOException(
-                        json["message"]?.jsonPrimitive?.contentOrNull ?: "ছবি আপলোড ব্যর্থ"
-                    )
+                    val error = json["error"]?.jsonPrimitive?.contentOrNull
+                        ?: json["message"]?.jsonPrimitive?.contentOrNull
+                        ?: "ছবি আপলোড ব্যর্থ"
+                    throw IOException(error)
                 }
-                json["url"]?.jsonPrimitive?.content
+                val data = json["data"]?.jsonObject
+                    ?: throw IOException("Server upload response invalid")
+                data["url"]?.jsonPrimitive?.contentOrNull
                     ?: throw IOException("Server upload URL পাওয়া যায়নি")
             }
         } finally {

@@ -684,7 +684,7 @@ private fun ProductDialog(
                 val uploaded = mutableListOf<String>()
                 var failed: String? = null
                 uris.forEach { uri ->
-                    ServerStorageClient(context).uploadImage(uri).fold(
+                    ServerStorageClient(context).uploadImage(uri, "products").fold(
                         { uploaded += it },
                         { failed = it.message ?: "ছবি আপলোড ব্যর্থ" }
                     )
@@ -1141,7 +1141,7 @@ private fun CategoryEditorDialog(
             onImageUrlChange = { imageUrl = it },
             label = "ক্যাটাগরির ছবি",
             height = 150.dp,
-            onUpload = { uri -> ServerStorageClient(context).uploadImage(uri) }
+            onUpload = { uri -> ServerStorageClient(context).uploadImage(uri, "categories") }
         )
         Field(sortOrder, { sortOrder = it }, "Sort order", KeyboardType.Number)
         Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.End) {
@@ -1991,7 +1991,7 @@ private fun BannerEditorDialog(
         if (uri != null) {
             uploading = true
             uploadScope.launch {
-                ServerStorageClient(context).uploadImage(uri).fold(
+                ServerStorageClient(context).uploadImage(uri, "banners").fold(
                     { imageUrl = it },
                     { Toast.makeText(context, it.message ?: "ছবি আপলোড ব্যর্থ", Toast.LENGTH_LONG).show() }
                 )
@@ -2269,7 +2269,7 @@ private fun SettingsScreen(onLogout: () -> Unit) {
         if (uri != null) {
             logoUploading = true
             scope.launch {
-                ServerStorageClient(context).uploadImage(uri).fold(
+                ServerStorageClient(context).uploadImage(uri, "settings").fold(
                     { url -> logoUrl = url; Repository().saveSetting("logo_url", JsonPrimitive(url)) },
                     { message = it.message ?: "লোগো আপলোড ব্যর্থ" }
                 )
