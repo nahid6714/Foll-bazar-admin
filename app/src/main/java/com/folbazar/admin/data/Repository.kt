@@ -31,6 +31,7 @@ class Repository(private val api: PhpAdminClient = PhpAdminClient()) {
                         }.getOrNull()?.let { return it }
                     }
                 }
+                else -> Unit
             }
         }
         return emptyList()

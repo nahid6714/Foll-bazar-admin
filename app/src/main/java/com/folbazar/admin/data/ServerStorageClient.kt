@@ -70,30 +70,34 @@ class ServerStorageClient(private val context: Context) {
                         val text = response.body?.string() ?: "{}"
                         if (!response.isSuccessful) {
                             lastError = IOException("Server upload ${response.code}: ${text.take(500)}")
-                            if (index < endpoints.lastIndex && (response.code == 404 || response.code == 405)) {
-                                continue
+                            val canTryNext = index < endpoints.lastIndex && (response.code == 404 || response.code == 405)
+                            if (!canTryNext) {
+                                throw lastError!!
                             }
-                            throw lastError!!
-                        }
+                        } else {
 
-                        val root = Json.parseToJsonElement(text).jsonObject
-                        if (root["ok"]?.jsonPrimitive?.booleanOrNull != true) {
-                            val error = root["error"]?.jsonPrimitive?.contentOrNull
-                                ?: root["message"]?.jsonPrimitive?.contentOrNull
-                                ?: "ছবি আপলোড ব্যর্থ"
-                            throw IOException(error)
-                        }
+                            val root = Json.parseToJsonElement(text).jsonObject
+                            if (root["ok"]?.jsonPrimitive?.booleanOrNull != true) {
+                                val error = root["error"]?.jsonPrimitive?.contentOrNull
+                                    ?: root["message"]?.jsonPrimitive?.contentOrNull
+                                    ?: "ছবি আপলোড ব্যর্থ"
+                                throw IOException(error)
+                            }
 
-                        val data = root["data"]?.jsonObject
-                        val url = data?.get("url")?.jsonPrimitive?.contentOrNull
-                            ?: root["url"]?.jsonPrimitive?.contentOrNull
-                            ?: throw IOException("Server upload URL পাওয়া যায়নি")
-                        return@runCatching url
+                            val data = root["data"]?.jsonObject
+                            val url = data?.get("url")?.jsonPrimitive?.contentOrNull
+                                ?: root["url"]?.jsonPrimitive?.contentOrNull
+                                ?: throw IOException("Server upload URL পাওয়া যায়নি")
+                            return@runCatching url
+                        }
                     }
                 } catch (e: IOException) {
                     lastError = e
-                    if (index < endpoints.lastIndex) continue
-                    throw e
+                    if (index == endpoints.lastIndex) {
+                        throw e
+                    }
+                    // Try the next compatible upload endpoint without using Kotlin's
+                    // experimental loop-control feature.
                 }
             }
             throw (lastError ?: IOException("ছবি আপলোড ব্যর্থ"))
