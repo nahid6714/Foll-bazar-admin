@@ -31,7 +31,7 @@ class Repository(private val api: PhpAdminClient = PhpAdminClient()) {
 
     private fun parseProduct(o: JsonObject) = Product(
         id = s(o, "id") ?: "", name = s(o, "name", "title") ?: "", slug = s(o, "slug") ?: "",
-        categoryId = s(o, "category_id"), categoryName = s(o, "category_name"),
+        categoryId = s(o, "category_id"), categoryName = s(o, "category_name") ?: (o["category"] as? JsonObject)?.let { s(it, "name") },
         description = s(o, "description"), price = d(o, "price") ?: 0.0,
         oldPrice = d(o, "old_price"), stock = i(o, "stock_quantity", "stock") ?: 0,
         soldQuantity = i(o, "sold_quantity") ?: 0, discountPercent = d(o, "discount_percent"),
@@ -164,15 +164,15 @@ class Repository(private val api: PhpAdminClient = PhpAdminClient()) {
     }}
 
     suspend fun setting(key: String): Result<JsonElement?> = runCatching { withContext(Dispatchers.IO) {
-        val rows = array(api.get("site_settings", "?select=value&key=eq.${key}"))
+        val rows = array(api.get("site_settings", "?select=*&key=eq.${key}"))
         rows.firstOrNull()?.jsonObject?.get("value")
     }}
 
     suspend fun saveSetting(key: String, value: JsonElement): Result<Unit> = runCatching { withContext(Dispatchers.IO) {
         val body = buildJsonObject { put("key", key); put("value", value) }
-        api.patch("site_settings", "key=eq.${key}", buildJsonObject { put("value", value) }.toString())
+        api.patch("site_settings", "key=eq.${key}", body.toString())
         val check = array(api.get("site_settings", "?select=key&key=eq.${key}"))
-        if (check.isEmpty()) api.post("site_settings", body.toString())
+        if (check.isEmpty()) Unit
         Unit
     }}
 
@@ -285,11 +285,15 @@ class Repository(private val api: PhpAdminClient = PhpAdminClient()) {
 
     suspend fun signInAdmin(email: String, password: String): Result<AdminSession> = runCatching { withContext(Dispatchers.IO) {
         val res = Json.parseToJsonElement(api.signIn(email, password)).jsonObject
-        val token = res["access_token"]?.jsonPrimitive?.contentOrNull
-            ?: throw IllegalStateException(res["message"]?.jsonPrimitive?.contentOrNull ?: "লগইন ব্যর্থ হয়েছে")
-        val userId = res["user_id"]?.jsonPrimitive?.contentOrNull
+        val data = res["data"]?.jsonObject ?: res
+        val token = data["access_token"]?.jsonPrimitive?.contentOrNull
+            ?: throw IllegalStateException(res["error"]?.jsonPrimitive?.contentOrNull ?: "লগইন ব্যর্থ হয়েছে")
+        val user = data["user"]?.jsonObject
+        val userId = user?.get("id")?.jsonPrimitive?.contentOrNull
             ?: throw IllegalStateException("Admin user ID পাওয়া যায়নি")
-        val userEmail = res["email"]?.jsonPrimitive?.contentOrNull ?: email
+        val userEmail = user["email"]?.jsonPrimitive?.contentOrNull ?: email
+        val role = user["role"]?.jsonPrimitive?.contentOrNull
+        if (role != "admin") throw IllegalStateException("এই অ্যাকাউন্টের Admin access নেই")
         AdminSession(token, null, userId, userEmail)
     }}
 

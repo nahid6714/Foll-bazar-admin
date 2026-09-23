@@ -2,17 +2,13 @@ name: Build and publish APK
 
 on:
   push:
-    branches:
-      - main
-
+    branches: [ "main", "master" ]
+  pull_request:
+    branches: [ "main", "master" ]
   workflow_dispatch:
 
 permissions:
   contents: read
-
-concurrency:
-  group: android-apk-build
-  cancel-in-progress: true
 
 jobs:
   build:

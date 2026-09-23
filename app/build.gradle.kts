@@ -13,7 +13,7 @@ val localProperties = Properties().apply {
 }
 fun prop(n: String): String = localProperties.getProperty(n, "")
 
-val DEFAULT_ADMIN_API_BASE_URL = "https://lakebazar.com/api"
+const val DEFAULT_ADMIN_API_BASE_URL = "https://lakebazar.com/api"
 
 android {
     namespace="com.folbazar.admin"
