@@ -269,7 +269,7 @@ class PhpAdminClient {
                 put("id", data["user_id"]!!)
                 put("email", data["email"] ?: JsonPrimitive(email))
                 put("name", data["name"] ?: JsonPrimitive("Fol Bazar Admin"))
-                put("role", "admin")
+                put("role", JsonPrimitive("admin"))
             }
             val wrapped = if (root["data"] != null) root.toMutableMap().apply { put("data", JsonObject(normalized)) }
             else normalized
