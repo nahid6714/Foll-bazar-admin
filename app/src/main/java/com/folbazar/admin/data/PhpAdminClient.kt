@@ -110,7 +110,7 @@ class PhpAdminClient {
                 }
             }
             "complaints" -> {
-                val raw = execute(request("complaints.php?action=admin-list").get().build())
+                val raw = execute(request("complaints.php?action=admin-list").post("{}".toRequestBody(jsonMedia)).build())
                 normalizeData(raw)
             }
             "wishlists" -> "[]"
