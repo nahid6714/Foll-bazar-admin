@@ -11,8 +11,8 @@ This version updates image handling in Banner, Product, and Category editors.
 - Category image has the same unified control.
 - Removing an assigned image clears the database field when the record is saved.
 
-## Supabase
+## PHP/MySQL
 No new SQL migration is required beyond the existing `BANNER_SIZE_MIGRATION.sql` already run for `site_banners`.
 
-## Cloudinary deletion note
-The app removes the image assignment/URL from the record. It does not expose a Cloudinary API secret inside the APK. Physical Cloudinary asset deletion requires a secure server-side endpoint and is intentionally not done client-side.
+## server storage deletion note
+The app removes the image assignment/URL from the record. It does not expose a server storage API secret inside the APK. Physical server storage asset deletion requires a secure server-side endpoint and is intentionally not done client-side.

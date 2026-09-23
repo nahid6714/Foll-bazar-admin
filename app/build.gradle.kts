@@ -11,15 +11,7 @@ val localProperties = Properties().apply {
     val f = rootProject.file("local.properties")
     if (f.exists()) f.inputStream().use { load(it) }
 }
-fun prop(n: String): String = when (n) {
-    "ADMIN_API_BASE_URL" -> localProperties.getProperty(n)
-        ?: "http://10.0.2.2:8080/api"
-    "CLOUDINARY_CLOUD_NAME" -> localProperties.getProperty(n)
-        ?: "bak9nabq"
-    "CLOUDINARY_UPLOAD_PRESET" -> localProperties.getProperty(n)
-        ?: "bak9nabq"
-    else -> localProperties.getProperty(n, "")
-}
+fun prop(n: String): String = localProperties.getProperty(n, "")
 
 android {
     namespace="com.folbazar.admin"
@@ -38,8 +30,16 @@ android {
     sourceSets["main"].java.exclude("com/example/**")
     kotlin.sourceSets.getByName("main").kotlin.exclude("com/example/**")
     buildTypes {
-        debug { buildConfigField("String","ADMIN_API_BASE_URL","\"${prop("ADMIN_API_BASE_URL")}\""); buildConfigField("String","CLOUDINARY_CLOUD_NAME","\"${prop("CLOUDINARY_CLOUD_NAME")}\""); buildConfigField("String","CLOUDINARY_UPLOAD_PRESET","\"${prop("CLOUDINARY_UPLOAD_PRESET")}\"") }
-        release { isMinifyEnabled=false; proguardFiles(getDefaultProguardFile("proguard-android-optimize.txt"),"proguard-rules.pro"); buildConfigField("String","ADMIN_API_BASE_URL","\"${System.getenv("ADMIN_API_BASE_URL")?.takeIf { it.isNotBlank() } ?: prop("ADMIN_API_BASE_URL")}\""); buildConfigField("String","CLOUDINARY_CLOUD_NAME","\"${System.getenv("CLOUDINARY_CLOUD_NAME")?.takeIf { it.isNotBlank() } ?: prop("CLOUDINARY_CLOUD_NAME")}\""); buildConfigField("String","CLOUDINARY_UPLOAD_PRESET","\"${System.getenv("CLOUDINARY_UPLOAD_PRESET")?.takeIf { it.isNotBlank() } ?: prop("CLOUDINARY_UPLOAD_PRESET")}\"") }
+        debug { buildConfigField("String","ADMIN_API_BASE_URL","\"${prop("ADMIN_API_BASE_URL")}\"") }
+        release {
+            isMinifyEnabled=false
+            proguardFiles(getDefaultProguardFile("proguard-android-optimize.txt"),"proguard-rules.pro")
+            buildConfigField(
+                "String",
+                "ADMIN_API_BASE_URL",
+                "\"${System.getenv("ADMIN_API_BASE_URL")?.takeIf { it.isNotBlank() } ?: prop("ADMIN_API_BASE_URL")}\""
+            )
+        }
     }
     compileOptions { sourceCompatibility=JavaVersion.VERSION_17; targetCompatibility=JavaVersion.VERSION_17 }
     kotlinOptions { jvmTarget="17" }
@@ -67,17 +67,10 @@ dependencies {
 // so this both (a) deletes the legacy folder on disk before every build, and
 // (b) excludes it directly from every KotlinCompile task as a second safety net.
 val legacyExampleDir = project.file("src/main/java/com/example")
-// The PHP/MySQL migration no longer uses Supabase. Remove any stale SupabaseClient
-// left behind in an older checkout before Kotlin compilation. This is intentionally
-// a build-time cleanup so old GitHub branches cannot break the release build.
-val legacySupabaseClient = project.file("src/main/java/com/folbazar/admin/data/SupabaseClient.kt")
 tasks.matching { it.name == "preBuild" }.configureEach {
     doFirst {
         if (legacyExampleDir.exists()) {
             legacyExampleDir.deleteRecursively()
-        }
-        if (legacySupabaseClient.exists()) {
-            legacySupabaseClient.delete()
         }
     }
 }

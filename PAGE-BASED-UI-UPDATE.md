@@ -4,4 +4,4 @@
 - Former overlay screens are rendered as normal full-page sections.
 - Browser confirmation popups for delete actions were removed.
 - Product image preview is retained, but constrained to a clean, normal preview box.
-- Existing Supabase and Cloudinary upload logic is retained.
+- Existing PHP/MySQL and server storage upload logic is retained.

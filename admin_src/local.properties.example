@@ -1,5 +1,3 @@
-ADMIN_API_BASE_URL=http://10.0.2.2:8080/api
+ADMIN_API_BASE_URL=https://lakebazar.com/api
 # Copy to local.properties for local builds. Never commit local.properties.
 sdk.dir=/path/to/Android/Sdk
-CLOUDINARY_CLOUD_NAME=YOUR_CLOUD_NAME
-CLOUDINARY_UPLOAD_PRESET=bak9nabq

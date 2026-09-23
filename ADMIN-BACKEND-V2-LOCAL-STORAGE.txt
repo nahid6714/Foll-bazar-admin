@@ -1,0 +1,6 @@
+Fol Bazar Admin - PHP/MySQL + cPanel Local Storage
+Version: 2.0
+Backend: https://lakebazar.com/api
+Images: https://lakebazar.com/uploads/admin/
+Supabase runtime: removed
+Cloudinary runtime: removed

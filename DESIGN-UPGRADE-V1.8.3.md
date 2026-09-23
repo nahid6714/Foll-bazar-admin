@@ -9,7 +9,7 @@ Implemented in the desktop React/Vite admin console:
 - Store health / quick-action dashboard area
 - Branded login card with password Show/Hide toggle
 - Improved buttons, forms, tables, modals, focus states, shadows and responsive layouts
-- Existing Supabase, CRUD, Cloudinary, order and settings workflows retained
+- Existing PHP/MySQL, CRUD, server storage, order and settings workflows retained
 
 ## Reference-style mobile dashboard
 

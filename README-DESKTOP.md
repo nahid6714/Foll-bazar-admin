@@ -5,7 +5,7 @@ Cross-platform desktop rebuild of the Fol Bazar Admin workflow.
 ## Added in this build
 - Full CRUD editor improvements for products, categories, coupons and banners
 - Product category selector
-- Product image preview + Cloudinary upload
+- Product image preview + server storage upload
 - Product variant manager using `product_variants`
 - Order detail modal with `order_items`
 - Order status/payment status controls
@@ -23,4 +23,4 @@ Cross-platform desktop rebuild of the Fol Bazar Admin workflow.
 The installer is generated under `release/`.
 
 ## Backend
-Use the same Supabase project and Cloudinary unsigned upload preset as the existing Admin app. Do not place any Supabase service-role key or Cloudinary API secret in the desktop app.
+Use the same PHP/MySQL project and server storage unsigned upload preset as the existing Admin app. Do not place any PHP/MySQL service-role key or server storage API secret in the desktop app.

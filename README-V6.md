@@ -6,10 +6,10 @@ This release continues the desktop rebuild from v5 with fuller management workfl
 - CSV export for Customers, Complaints, Coupons and Banners
 - Complaint status editor: open, in_progress, resolved, closed
 - Customer role selector
-- Banner type selector and Cloudinary image upload through the shared editor
+- Banner type selector and server storage image upload through the shared editor
 - Coupon discount type selector
 - Existing Product, Variant, Stock and Order workflows retained
-- Supabase + Cloudinary configuration retained
+- PHP/MySQL + server storage configuration retained
 - Windows/Linux/macOS Electron packaging retained
 
 ## Build

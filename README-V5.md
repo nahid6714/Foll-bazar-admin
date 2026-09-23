@@ -7,7 +7,7 @@ This release continues the desktop rebuild of the Android Admin app.
 - Quick stock editor from the product table.
 - Product variant management retained.
 - Order detail and status/payment workflows retained.
-- Cloudinary image upload retained for product/banner image fields.
+- server storage image upload retained for product/banner image fields.
 - Cross-platform Electron packaging names corrected for Windows, Linux and macOS.
 
 ## Build on Windows
@@ -25,4 +25,4 @@ npm run dist
 ```
 
 ## Important
-Use a Supabase publishable key only. Never put a Supabase service-role key or Cloudinary API secret in this desktop application.
+Use a PHP/MySQL publishable key only. Never put a PHP/MySQL service-role key or server storage API secret in this desktop application.

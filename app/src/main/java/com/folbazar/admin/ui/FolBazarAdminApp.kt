@@ -228,7 +228,7 @@ private fun DashboardShortcut(title: String, icon: ImageVector, modifier: Modifi
         item{AdminAction("অভিযোগ","অভিযোগ দেখা, নোট ও status পরিবর্তন",Icons.Default.ReportProblem){nav.navigate("complaints")}}
         item{AdminAction("কুপন / ডিসকাউন্ট","coupon code, percent/fixed discount, limit",Icons.Default.LocalOffer){nav.navigate("coupons")}}
         item{AdminAction("Wishlist","কোন পণ্য কতবার wishlist হয়েছে",Icons.Default.Favorite){nav.navigate("wishlist")}}
-        item{AdminAction("ওয়েবসাইট ব্যানার / ইভেন্ট","Hero, Promo ও Event banner যোগ, edit, active/off, delete ও Cloudinary image",Icons.Default.Image){nav.navigate("banners")}}
+        item{AdminAction("ওয়েবসাইট ব্যানার / ইভেন্ট","Hero, Promo ও Event banner যোগ, edit, active/off, delete ও server image",Icons.Default.Image){nav.navigate("banners")}}
         item{AdminAction("সেলস অ্যানালিটিক্স","Sales goal, আজকের অর্ডার, delivered revenue ও top products",Icons.Default.Analytics){nav.navigate("analytics")}}
         item{AdminAction("সেটিংস / App Update","অ্যাপ আপডেট চেক, ডাউনলোড ও ইনস্টল",Icons.Default.Settings){nav.navigate("settings")}}
         item{Text("নিরাপত্তা: database RLS policy-ই চূড়ান্ত permission; app শুধু admin JWT দিয়ে কাজ করে.",style=MaterialTheme.typography.bodySmall,color=MaterialTheme.colorScheme.onSurfaceVariant)}
@@ -265,7 +265,7 @@ private fun Products() {
         Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
             Column(Modifier.weight(1f)) {
                 Text("পণ্য", style = MaterialTheme.typography.headlineSmall, fontWeight = FontWeight.Bold)
-                Text("পণ্য, দাম, স্টক, সাইজ ও Cloudinary ছবি")
+                Text("পণ্য, দাম, স্টক, সাইজ ও server-এর ছবি")
             }
             IconButton(onClick = { refresh++ }) { Icon(Icons.Default.Refresh, "রিফ্রেশ") }
             FilledTonalButton(onClick = { add = true }) {
@@ -684,7 +684,7 @@ private fun ProductDialog(
                 val uploaded = mutableListOf<String>()
                 var failed: String? = null
                 uris.forEach { uri ->
-                    CloudinaryClient(context).uploadImage(uri).fold(
+                    ServerStorageClient(context).uploadImage(uri).fold(
                         { uploaded += it },
                         { failed = it.message ?: "ছবি আপলোড ব্যর্থ" }
                     )
@@ -1141,7 +1141,7 @@ private fun CategoryEditorDialog(
             onImageUrlChange = { imageUrl = it },
             label = "ক্যাটাগরির ছবি",
             height = 150.dp,
-            onUpload = { uri -> CloudinaryClient(context).uploadImage(uri) }
+            onUpload = { uri -> ServerStorageClient(context).uploadImage(uri) }
         )
         Field(sortOrder, { sortOrder = it }, "Sort order", KeyboardType.Number)
         Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.End) {
@@ -1991,7 +1991,7 @@ private fun BannerEditorDialog(
         if (uri != null) {
             uploading = true
             uploadScope.launch {
-                CloudinaryClient(context).uploadImage(uri).fold(
+                ServerStorageClient(context).uploadImage(uri).fold(
                     { imageUrl = it },
                     { Toast.makeText(context, it.message ?: "ছবি আপলোড ব্যর্থ", Toast.LENGTH_LONG).show() }
                 )
@@ -2269,7 +2269,7 @@ private fun SettingsScreen(onLogout: () -> Unit) {
         if (uri != null) {
             logoUploading = true
             scope.launch {
-                CloudinaryClient(context).uploadImage(uri).fold(
+                ServerStorageClient(context).uploadImage(uri).fold(
                     { url -> logoUrl = url; Repository().saveSetting("logo_url", JsonPrimitive(url)) },
                     { message = it.message ?: "লোগো আপলোড ব্যর্থ" }
                 )
@@ -2317,7 +2317,7 @@ private fun SettingsScreen(onLogout: () -> Unit) {
             Card(Modifier.fillMaxWidth()) {
                 Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
                     Text("ওয়েবসাইট লোগো", style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.Bold)
-                    Text("Cloudinary-তে লোগো আপলোড করে site_settings.logo_url-এ সংরক্ষণ করুন।", style = MaterialTheme.typography.bodySmall)
+                    Text("সার্ভারে লোগো আপলোড করে site_settings.logo_url-এ সংরক্ষণ করুন।", style = MaterialTheme.typography.bodySmall)
                     if (logoUrl.isNotBlank()) AsyncImage(model = logoUrl, contentDescription = "Logo", modifier = Modifier.size(84.dp))
                     Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                         OutlinedButton(onClick = { logoPicker.launch("image/*") }, enabled = !logoUploading) {

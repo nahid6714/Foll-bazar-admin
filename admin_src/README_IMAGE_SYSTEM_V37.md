@@ -8,14 +8,14 @@ This version updates image handling in Banner, Product, and Category editors.
 - Banner width (50–100%) and height (120–500px) update the preview frame immediately.
 - Preview is clipped, so artwork outside the selected frame is hidden instead of being shown with `Fit`.
 - A `ডিফল্ট` button resets the editor to 100% width and 250px height.
-- The saved Supabase width/height fields are left unchanged; this update is Admin-App-only.
+- The saved PHP/MySQL width/height fields are left unchanged; this update is Admin-App-only.
 - Product main image has the same unified control.
 - Product gallery thumbnails have a remove button.
 - Category image has the same unified control.
 - Removing an assigned image clears the database field when the record is saved.
 
-## Supabase
+## PHP/MySQL
 No new SQL migration is required beyond the existing `BANNER_SIZE_MIGRATION.sql` already run for `site_banners`.
 
-## Cloudinary deletion note
-The app removes the image assignment/URL from the record. It does not expose a Cloudinary API secret inside the APK. Physical Cloudinary asset deletion requires a secure server-side endpoint and is intentionally not done client-side.
+## server storage deletion note
+The app removes the image assignment/URL from the record. It does not expose a server storage API secret inside the APK. Physical server storage asset deletion requires a secure server-side endpoint and is intentionally not done client-side.
