@@ -24,7 +24,7 @@ import java.util.zip.ZipFile
 /**
  * Checks GitHub Releases through a small update.json manifest and downloads the APK.
  * The APK is validated before Android's package installer is opened.
- * No GitHub API token or Cloudinary secret is used here.
+ * No storage-provider secret is used here.
  */
 data class AppUpdateInfo(
     val versionCode: Int,

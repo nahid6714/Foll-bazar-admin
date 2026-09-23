@@ -13,6 +13,8 @@ val localProperties = Properties().apply {
 }
 fun prop(n: String): String = localProperties.getProperty(n, "")
 
+const val DEFAULT_ADMIN_API_BASE_URL = "https://lakebazar.com/api"
+
 android {
     namespace="com.folbazar.admin"
     compileSdk=35
@@ -30,14 +32,14 @@ android {
     sourceSets["main"].java.exclude("com/example/**")
     kotlin.sourceSets.getByName("main").kotlin.exclude("com/example/**")
     buildTypes {
-        debug { buildConfigField("String","ADMIN_API_BASE_URL","\"${prop("ADMIN_API_BASE_URL")}\"") }
+        debug { buildConfigField("String","ADMIN_API_BASE_URL","\"${prop("ADMIN_API_BASE_URL").ifBlank { DEFAULT_ADMIN_API_BASE_URL }}\"") }
         release {
             isMinifyEnabled=false
             proguardFiles(getDefaultProguardFile("proguard-android-optimize.txt"),"proguard-rules.pro")
             buildConfigField(
                 "String",
                 "ADMIN_API_BASE_URL",
-                "\"${System.getenv("ADMIN_API_BASE_URL")?.takeIf { it.isNotBlank() } ?: prop("ADMIN_API_BASE_URL")}\""
+                "\"${System.getenv("ADMIN_API_BASE_URL")?.takeIf { it.isNotBlank() } ?: prop("ADMIN_API_BASE_URL").ifBlank { DEFAULT_ADMIN_API_BASE_URL }}\""
             )
         }
     }

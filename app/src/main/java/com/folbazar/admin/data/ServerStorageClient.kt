@@ -17,7 +17,7 @@ import java.io.File
 import java.io.FileOutputStream
 import java.io.IOException
 
-/** Uploads admin images to the same PHP/MySQL site's local storage. No Cloudinary/Supabase. */
+/** Uploads admin images to the same PHP/MySQL site's local storage. */
 class ServerStorageClient(private val context: Context) {
     private val client = OkHttpClient()
     private val baseUrl = BuildConfig.ADMIN_API_BASE_URL.trim().trimEnd('/')

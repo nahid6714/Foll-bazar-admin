@@ -1,70 +1,73 @@
-# ফল বাজার Admin — PHP/MySQL Sync Update
+# Fol Bazar Admin — Android + Laravel/MySQL v2.1
 
-এই আপডেটে Admin Android app-এর UI/feature structure আগের মতো রাখা হয়েছে, কিন্তু data/backend connection বর্তমান Fol Bazar website-এর PHP + MySQL architecture-এর সাথে sync করা হয়েছে।
+This is the cleaned Android Admin app source for Fol Bazar.
 
-## Current sync target
-- Website data source: PHP API + MySQL (`foll_bazar`)
-- Admin data source: the same PHP API + MySQL
-- Product/category/variant/order/customer/complaint/coupon/banner/site-setting data একই database থেকে আসবে
-- Product gallery URL এবং existing image flow আপাতত server storage-তেই রাখা হয়েছে
-- PHP/MySQL runtime dependency Android Admin থেকে সরানো হয়েছে
+## Backend architecture
 
-## Included features
+`Android Admin App → HTTPS PHP API → Laravel site's MySQL database`
+
+The Android runtime does not use external database/storage services. Product, category, banner and logo images are uploaded to the same cPanel server storage used by the website.
+
+### API
+
+Production default:
+
+`https://lakebazar.com/api`
+
+The API entry point is:
+
+`public/api/admin.php`
+
+The API reads the Laravel root `.env`, so database credentials are never compiled into the APK.
+
+## Included Admin features
+
 - Admin login/session
-- Products: add / edit / delete, stock, price, old price, description, category, image, gallery, active, featured, flash-sale, hot-deal
-- Categories: add / edit / delete / active state
+- Dashboard and store metrics
+- Products
 - Product variants
-- Orders + order items + status/payment status
-- Customers + role management
-- Complaints + admin note/status
+- Categories
+- Stock and pricing
+- Orders
+- Payment/order status updates
+- Customers/profiles
+- Complaints
 - Coupons
-- Wishlist summary
-- Site banners
+- Homepage/site banners
 - Site settings
-- Dashboard
-- Existing server storage upload flow
-- Existing app update / APK updater UI
+- Wishlist summary
+- Server-side image upload
+- Receipt/export tools
+- Theme/preferences
+- In-app APK update checker
 
-## Backend setup
-The ZIP contains:
-- `backend/api/admin.php` — Admin API endpoint
-- `backend/sql/admin_users.sql` — admin account/session tables
-- `backend/tools/create_admin.php` — first admin account creator
+## Important build fix
 
-Place `admin.php` under the existing PHP backend's `/api/` directory. Run `admin_users.sql` once in the same `foll_bazar` database, then create an admin account with the PHP CLI script.
+The previous GitHub Actions failure came from stale Kotlin references to configuration constants that no longer exist. This version contains no runtime source references to those old services, so the missing-constant errors are removed at the source instead of being hidden with fake secrets.
 
-The script expects the existing backend `config/config.php`. If your backend is `C:\Foll-Bazar\backend`, keep the same database config already used by the website API.
+## Local build
 
-## Local Android emulator
-Default debug API:
+1. Open this folder in Android Studio.
+2. Let Android Studio sync the Gradle project.
+3. `local.properties` is optional because the production API URL is now the safe default.
+4. For a different API, add:
 
-`http://10.0.2.2:8080/api`
+`ADMIN_API_BASE_URL=https://your-domain.example/api`
 
-`10.0.2.2` points the Android emulator to the host PC. Start the local PHP backend first:
+Never put a database password or private API secret in `local.properties`, Kotlin code, or the APK.
 
-```text
-cd C:\Foll-Bazar\backend
-C:\xampp\php\php.exe -S 127.0.0.1:8080 -t .
-```
+## cPanel backend deployment
 
-For a physical phone, set `ADMIN_API_BASE_URL` in `local.properties` to the PC LAN address. For cPanel release, set it to the real HTTPS API URL.
+Copy:
 
-## Admin login
-The Admin app no longer uses PHP/MySQL Auth. The PHP API creates an opaque admin session token after verifying the dedicated `admin_users` password hash.
+- `backend/api/admin.php` → Laravel `public/api/admin.php`
+- `public/setup-admin.php` → Laravel `public/setup-admin.php` only during first-admin setup
+- `backend/sql/admin_users.sql` can be imported in phpMyAdmin if the admin tables do not exist
 
-Do not put the MySQL password, PHP secret, or server storage API secret in the APK.
+Delete `setup-admin.php` immediately after creating the first admin.
 
-## server storage
-server storage is intentionally **not** migrated in this update. The existing unsigned upload preset remains active so the Admin app and current website continue to use the same image URLs. The server storage-to-cPanel storage migration can be done later as a separate synchronized update.
+## GitHub Actions
 
-## Important migration rule
-Do not delete or disable the old PHP/MySQL project yet. It remains a backup/reference until the complete website + Admin migration is verified.
+`.github/workflows/build-apk.yml` builds the release APK on every push/PR and uploads the APK as a workflow artifact. It uses Java 17 and Gradle 8.9, compatible with the project's Android Gradle Plugin 8.7.3.
 
-## Build configuration
-`local.properties.example` contains:
-
-- `ADMIN_API_BASE_URL`
-- `REMOVED_CLOUD_STORAGE_SETTING`
-- `REMOVED_CLOUD_STORAGE_SETTING`
-
-The old PHP/MySQL URL/key are no longer needed by the Android Admin runtime.
+The workflow also fails early if stale legacy provider references are reintroduced into the Android Kotlin source.
