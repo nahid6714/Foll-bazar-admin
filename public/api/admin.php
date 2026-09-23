@@ -234,6 +234,11 @@ if ($action === 'upload') {
     }
 
     $base = rtrim((string)($config['app_url'] ?? ''), '/');
+    if ($base === '') {
+        $scheme = (!empty($_SERVER['HTTPS']) && $_SERVER['HTTPS'] !== 'off') ? 'https' : 'http';
+        $host = (string)($_SERVER['HTTP_HOST'] ?? '');
+        if ($host !== '') $base = $scheme . '://' . $host;
+    }
     $url = $base . '/uploads/admin/' . rawurlencode($filename);
     respond(['ok'=>true,'url'=>$url],201);
 }

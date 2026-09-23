@@ -92,6 +92,20 @@ class PhpAdminClient {
         }
     }
 
+    private fun executeWithThreeWayFallback(primary: Request, second: Request, third: Request): String {
+        return try {
+            execute(primary)
+        } catch (e: IOException) {
+            val message = e.message.orEmpty()
+            if (message.contains("Admin API 404") || message.contains("Admin API 405") || message.contains("Unknown admin action") || message.contains("Unknown admin resource")) {
+                try { execute(second) } catch (e2: IOException) {
+                    val m2 = e2.message.orEmpty()
+                    if (m2.contains("Admin API 404") || m2.contains("Admin API 405") || m2.contains("Unknown admin action") || m2.contains("Unknown admin resource")) execute(third) else throw e2
+                }
+            } else throw e
+        }
+    }
+
     private fun idFromFilter(filter: String): String? =
         Regex("(?:^|&)id=eq\\.([^&]+)").find(filter)?.groupValues?.getOrNull(1)
 
@@ -124,7 +138,8 @@ class PhpAdminClient {
                 val suffix = productId?.let { "&product_id=${encode(it)}" } ?: ""
                 val primary = request("admin-data?resource=product_variants$suffix").get().build()
                 val fallback = request(legacyResourcePath("product_variants", query)).get().build()
-                normalizeData(executeWithCompatibilityFallback(primary, fallback))
+                val legacyManage = request("manage.php?resource=variants&action=list$suffix").get().build()
+                normalizeData(executeWithThreeWayFallback(primary, fallback, legacyManage))
             }
             "order_items" -> {
                 val orderId = queryValue(query, "order_id")
@@ -184,15 +199,21 @@ class PhpAdminClient {
             "categories" -> "admin/categories"
             "coupons" -> "admin/coupons"
             "site_banners" -> "admin/banners"
-            "product_variants" -> "manage.php?resource=variants&action=save"
+            "product_variants" -> "admin-data?resource=product_variants&action=save"
             else -> throw IllegalArgumentException("Unsupported Laravel POST resource: $table")
         }
         val b = request(path).addHeader("Content-Type", "application/json")
         val primary = b.post(jsonBody.toRequestBody(jsonMedia)).build()
-        val fallback = request("admin-data?resource=${encode(table)}&action=save")
+        val fallback = request(legacyResourcePath(table))
             .addHeader("Content-Type", "application/json")
             .post(jsonBody.toRequestBody(jsonMedia)).build()
-        return executeWithCompatibilityFallback(primary, fallback).let(::normalizeData)
+        val raw = if (table == "product_variants") {
+            val third = request("manage.php?resource=variants&action=save")
+                .addHeader("Content-Type", "application/json")
+                .post(jsonBody.toRequestBody(jsonMedia)).build()
+            executeWithThreeWayFallback(primary, fallback, third)
+        } else executeWithCompatibilityFallback(primary, fallback)
+        return raw.let(::normalizeData)
     }
 
     fun patch(table: String, filter: String, jsonBody: String): String {
@@ -206,7 +227,7 @@ class PhpAdminClient {
             "profiles" -> "admin/customers/${encode(id ?: throw IllegalArgumentException("Customer id required"))}"
             "site_settings" -> "admin/settings"
             "complaints" -> "complaints.php?action=admin-update"
-            "product_variants" -> "manage.php?resource=variants&action=save"
+            "product_variants" -> "admin-data?resource=product_variants&action=save"
             else -> throw IllegalArgumentException("Unsupported Laravel PATCH resource: $table")
         }
         val method = when (table) {
@@ -224,12 +245,21 @@ class PhpAdminClient {
             "PUT" -> b.put(body.toRequestBody(jsonMedia)).build()
             else -> b.patch(body.toRequestBody(jsonMedia)).build()
         }
-        val fallbackPath = buildString {
-            append("admin-data?resource=").append(encode(table)).append("&action=save")
-            if (!id.isNullOrBlank()) append("&id=").append(encode(id))
-        }
-        val fallback = request(fallbackPath).addHeader("Content-Type", "application/json").post(body.toRequestBody(jsonMedia)).build()
-        return executeWithCompatibilityFallback(req, fallback).let(::normalizeData)
+        val fallbackBody = if (!id.isNullOrBlank()) {
+            val obj = json.parseToJsonElement(body).jsonObject.toMutableMap()
+            obj["id"] = JsonPrimitive(id)
+            JsonObject(obj).toString()
+        } else body
+        val fallback = request(legacyResourcePath(table) + "&id=${encode(id ?: "")}")
+            .addHeader("Content-Type", "application/json")
+            .post(fallbackBody.toRequestBody(jsonMedia)).build()
+        val raw = if (table == "product_variants") {
+            val third = request("manage.php?resource=variants&action=save&id=${encode(id ?: "")}")
+                .addHeader("Content-Type", "application/json")
+                .post(fallbackBody.toRequestBody(jsonMedia)).build()
+            executeWithThreeWayFallback(req, fallback, third)
+        } else executeWithCompatibilityFallback(req, fallback)
+        return raw.let(::normalizeData)
     }
 
     fun delete(table: String, filter: String): String {
@@ -239,12 +269,16 @@ class PhpAdminClient {
             "categories" -> "admin/categories/${encode(id)}"
             "coupons" -> "admin/coupons/${encode(id)}"
             "site_banners" -> "admin/banners/${encode(id)}"
-            "product_variants" -> "manage.php?resource=variants&action=delete&id=${encode(id)}"
+            "product_variants" -> "admin-data?resource=product_variants&action=delete&id=${encode(id)}"
             else -> throw IllegalArgumentException("Unsupported Laravel DELETE resource: $table")
         }
         val req = request(path).delete().build()
-        val fallback = request("admin-data?resource=${encode(table)}&action=delete&id=${encode(id)}").delete().build()
-        return executeWithCompatibilityFallback(req, fallback).let(::normalizeData)
+        val fallback = request(legacyResourcePath(table) + "&id=${encode(id)}").delete().build()
+        val raw = if (table == "product_variants") {
+            val third = request("manage.php?resource=variants&action=delete&id=${encode(id)}").delete().build()
+            executeWithThreeWayFallback(req, fallback, third)
+        } else executeWithCompatibilityFallback(req, fallback)
+        return raw.let(::normalizeData)
     }
 
     fun signIn(email: String, password: String): String {

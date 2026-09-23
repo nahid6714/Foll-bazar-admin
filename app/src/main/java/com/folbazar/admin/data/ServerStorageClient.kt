@@ -68,27 +68,24 @@ class ServerStorageClient(private val context: Context) {
 
                     client.newCall(builder.build()).execute().use { response ->
                         val text = response.body?.string() ?: "{}"
+                        val root = runCatching { Json.parseToJsonElement(text).jsonObject }.getOrNull()
+                        val reportedError = root?.get("error")?.jsonPrimitive?.contentOrNull
+                            ?: root?.get("message")?.jsonPrimitive?.contentOrNull
                         if (!response.isSuccessful) {
-                            lastError = IOException("Server upload ${response.code}: ${text.take(500)}")
-                            val canTryNext = index < endpoints.lastIndex && (response.code == 404 || response.code == 405)
-                            if (!canTryNext) {
-                                throw lastError!!
-                            }
+                            lastError = IOException("Server upload ${response.code}: ${reportedError ?: text.take(500)}")
+                            val canTryNext = index < endpoints.lastIndex && (response.code == 401 || response.code == 403 || response.code == 404 || response.code == 405 || response.code == 500)
+                            if (!canTryNext) throw lastError!!
                         } else {
-
-                            val root = Json.parseToJsonElement(text).jsonObject
-                            if (root["ok"]?.jsonPrimitive?.booleanOrNull != true) {
-                                val error = root["error"]?.jsonPrimitive?.contentOrNull
-                                    ?: root["message"]?.jsonPrimitive?.contentOrNull
-                                    ?: "ছবি আপলোড ব্যর্থ"
-                                throw IOException(error)
-                            }
-
-                            val data = root["data"]?.jsonObject
+                            val data = root?.get("data") as? kotlinx.serialization.json.JsonObject
                             val url = data?.get("url")?.jsonPrimitive?.contentOrNull
-                                ?: root["url"]?.jsonPrimitive?.contentOrNull
-                                ?: throw IOException("Server upload URL পাওয়া যায়নি")
-                            return@runCatching url
+                                ?: root?.get("url")?.jsonPrimitive?.contentOrNull
+                            val ok = root?.get("ok")?.jsonPrimitive?.booleanOrNull
+                            if (!url.isNullOrBlank() && ok != false) {
+                                return@runCatching url
+                            }
+                            lastError = IOException(reportedError ?: "ছবি আপলোড ব্যর্থ")
+                            val canTryNext = index < endpoints.lastIndex && (reportedError?.contains("Unknown admin action", ignoreCase = true) == true || reportedError?.contains("not found", ignoreCase = true) == true)
+                            if (!canTryNext) throw lastError!!
                         }
                     }
                 } catch (e: IOException) {
