@@ -17,11 +17,24 @@ class Repository(private val api: PhpAdminClient = PhpAdminClient()) {
     private fun b(o: JsonObject, vararg keys: String): Boolean? = keys.asSequence()
         .mapNotNull { o[it]?.jsonPrimitive?.booleanOrNull }
         .firstOrNull()
-    private fun sa(o: JsonObject, vararg keys: String): List<String> = keys.asSequence()
-        .mapNotNull { o[it] as? JsonArray }
-        .firstOrNull()
-        ?.mapNotNull { it.jsonPrimitive.contentOrNull }
-        ?: emptyList()
+    private fun sa(o: JsonObject, vararg keys: String): List<String> {
+        for (key in keys) {
+            val value = o[key] ?: continue
+            when (value) {
+                is JsonArray -> return value.mapNotNull { it.jsonPrimitive.contentOrNull }
+                is JsonPrimitive -> {
+                    val raw = value.contentOrNull?.trim().orEmpty()
+                    if (raw.startsWith("[")) {
+                        runCatching {
+                            Json.parseToJsonElement(raw).jsonArray
+                                .mapNotNull { it.jsonPrimitive.contentOrNull }
+                        }.getOrNull()?.let { return it }
+                    }
+                }
+            }
+        }
+        return emptyList()
+    }
 
     private fun parseCategory(o: JsonObject) = Category(
         id = s(o, "id") ?: "", name = s(o, "name") ?: "", slug = s(o, "slug") ?: "",
@@ -169,11 +182,13 @@ class Repository(private val api: PhpAdminClient = PhpAdminClient()) {
     }}
 
     suspend fun saveSetting(key: String, value: JsonElement): Result<Unit> = runCatching { withContext(Dispatchers.IO) {
-        val body = buildJsonObject { put("key", key); put("value", value) }
+        // Site settings are stored as text in the Laravel/MySQL layer. Sending a JSON
+        // number/boolean directly can fail Laravel's string validation, so normalize it.
+        val storedValue = (value as? JsonPrimitive)?.contentOrNull ?: value.toString()
+        val body = buildJsonObject { put("key", key); put("value", storedValue) }
         api.patch("site_settings", "key=eq.${key}", body.toString())
         val check = array(api.get("site_settings", "?select=key&key=eq.${key}"))
-        if (check.isEmpty()) Unit
-        Unit
+        if (check.isEmpty()) throw IllegalStateException("Setting save was not confirmed")
     }}
 
     suspend fun banners(): Result<List<SiteBanner>> = runCatching { withContext(Dispatchers.IO) {
@@ -205,7 +220,7 @@ class Repository(private val api: PhpAdminClient = PhpAdminClient()) {
     }}
 
     suspend fun updateCategory(c: Category): Result<Category> = runCatching { withContext(Dispatchers.IO) {
-        val body = buildJsonObject { put("name", c.name); put("description", c.description); put("image_url", c.imageUrl); put("sort_order", c.sortOrder); put("is_active", c.active) }
+        val body = buildJsonObject { put("name", c.name); put("slug", c.slug); put("description", c.description); put("image_url", c.imageUrl); put("sort_order", c.sortOrder); put("is_active", c.active) }
         parseCategory(array(api.patch("categories", "id=eq.${c.id}", body.toString())).first().jsonObject)
     }}
 
@@ -225,7 +240,7 @@ class Repository(private val api: PhpAdminClient = PhpAdminClient()) {
 
     suspend fun updateProduct(p: Product): Result<Product> = runCatching { withContext(Dispatchers.IO) {
         val body = buildJsonObject {
-            put("name", p.name); put("description", p.description); put("price", p.price); put("old_price", p.oldPrice)
+            put("name", p.name); put("slug", p.slug); put("description", p.description); put("price", p.price); put("old_price", p.oldPrice)
             put("stock_quantity", p.stock); put("category_id", p.categoryId); put("image_url", p.imageUrl); put("is_active", p.active)
             putJsonArray("gallery_urls") { p.galleryUrls.forEach { add(it) } }
             put("is_featured", p.featured); put("is_flash_sale", p.flashSale); put("is_hot_deal", p.hotDeal); put("sort_order", p.sortOrder)

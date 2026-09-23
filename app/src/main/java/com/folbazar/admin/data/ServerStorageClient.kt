@@ -16,10 +16,16 @@ import okhttp3.RequestBody.Companion.asRequestBody
 import java.io.File
 import java.io.FileOutputStream
 import java.io.IOException
+import java.util.concurrent.TimeUnit
 
 /** Uploads admin images to the same PHP/MySQL site's local storage. */
 class ServerStorageClient(private val context: Context) {
-    private val client = OkHttpClient()
+    private val client = OkHttpClient.Builder()
+        .connectTimeout(20, TimeUnit.SECONDS)
+        .readTimeout(90, TimeUnit.SECONDS)
+        .writeTimeout(90, TimeUnit.SECONDS)
+        .callTimeout(120, TimeUnit.SECONDS)
+        .build()
     private val baseUrl = BuildConfig.ADMIN_API_BASE_URL.trim().trimEnd('/')
 
     suspend fun uploadImage(uri: Uri, folder: String = "products"): Result<String> = runCatching {
@@ -37,39 +43,69 @@ class ServerStorageClient(private val context: Context) {
                 .setType(MultipartBody.FORM)
                 .addFormDataPart(
                     "file",
-                    "image",
+                    "image.${extensionForMime(mime)}",
                     temp.asRequestBody(mime.toMediaType())
                 )
                 .addFormDataPart("folder", folder)
                 .build()
 
-            val builder = Request.Builder()
-                .url("$baseUrl/upload")
-                .post(body)
+            val endpoints = listOf(
+                "$baseUrl/upload",
+                "$baseUrl/admin.php?action=upload"
+            )
+            var lastError: IOException? = null
 
-            Session.accessToken?.takeIf { it.isNotBlank() }?.let {
-                builder.addHeader("Authorization", "Bearer $it")
-            }
+            for ((index, endpoint) in endpoints.withIndex()) {
+                try {
+                    val builder = Request.Builder()
+                        .url(endpoint)
+                        .post(body)
+                        .addHeader("Accept", "application/json")
 
-            client.newCall(builder.build()).execute().use { response ->
-                val text = response.body?.string() ?: "{}"
-                if (!response.isSuccessful) {
-                    throw IOException("Server upload ${response.code}: $text")
+                    Session.accessToken?.takeIf { it.isNotBlank() }?.let {
+                        builder.addHeader("Authorization", "Bearer $it")
+                    }
+
+                    client.newCall(builder.build()).execute().use { response ->
+                        val text = response.body?.string() ?: "{}"
+                        if (!response.isSuccessful) {
+                            lastError = IOException("Server upload ${response.code}: ${text.take(500)}")
+                            if (index < endpoints.lastIndex && (response.code == 404 || response.code == 405)) {
+                                continue
+                            }
+                            throw lastError!!
+                        }
+
+                        val root = Json.parseToJsonElement(text).jsonObject
+                        if (root["ok"]?.jsonPrimitive?.booleanOrNull != true) {
+                            val error = root["error"]?.jsonPrimitive?.contentOrNull
+                                ?: root["message"]?.jsonPrimitive?.contentOrNull
+                                ?: "ছবি আপলোড ব্যর্থ"
+                            throw IOException(error)
+                        }
+
+                        val data = root["data"]?.jsonObject
+                        val url = data?.get("url")?.jsonPrimitive?.contentOrNull
+                            ?: root["url"]?.jsonPrimitive?.contentOrNull
+                            ?: throw IOException("Server upload URL পাওয়া যায়নি")
+                        return@runCatching url
+                    }
+                } catch (e: IOException) {
+                    lastError = e
+                    if (index < endpoints.lastIndex) continue
+                    throw e
                 }
-                val json = Json.parseToJsonElement(text).jsonObject
-                if (json["ok"]?.jsonPrimitive?.booleanOrNull != true) {
-                    val error = json["error"]?.jsonPrimitive?.contentOrNull
-                        ?: json["message"]?.jsonPrimitive?.contentOrNull
-                        ?: "ছবি আপলোড ব্যর্থ"
-                    throw IOException(error)
-                }
-                val data = json["data"]?.jsonObject
-                    ?: throw IOException("Server upload response invalid")
-                data["url"]?.jsonPrimitive?.contentOrNull
-                    ?: throw IOException("Server upload URL পাওয়া যায়নি")
             }
+            throw (lastError ?: IOException("ছবি আপলোড ব্যর্থ"))
         } finally {
             temp.delete()
         }
+    }
+
+    private fun extensionForMime(mime: String): String = when (mime.lowercase()) {
+        "image/png" -> "png"
+        "image/webp" -> "webp"
+        "image/gif" -> "gif"
+        else -> "jpg"
     }
 }

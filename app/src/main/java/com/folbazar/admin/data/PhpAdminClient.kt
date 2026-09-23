@@ -17,10 +17,16 @@ import okhttp3.Request
 import okhttp3.RequestBody.Companion.toRequestBody
 import java.io.IOException
 import java.net.URLEncoder
+import java.util.concurrent.TimeUnit
 
 /** Laravel admin API client. Keeps the old Repository interface while using the live Laravel API. */
 class PhpAdminClient {
-    private val client = OkHttpClient()
+    private val client = OkHttpClient.Builder()
+        .connectTimeout(20, TimeUnit.SECONDS)
+        .readTimeout(45, TimeUnit.SECONDS)
+        .writeTimeout(45, TimeUnit.SECONDS)
+        .callTimeout(60, TimeUnit.SECONDS)
+        .build()
     private val jsonMedia = "application/json; charset=utf-8".toMediaType()
     private val baseUrl: String get() = BuildConfig.ADMIN_API_BASE_URL.trim().trimEnd('/')
     private val json = Json { ignoreUnknownKeys = true }
@@ -71,6 +77,19 @@ class PhpAdminClient {
     private fun request(path: String): Request.Builder =
         bearer(Request.Builder().url("$baseUrl/$path").addHeader("Accept", "application/json"))
 
+    private fun executeWithCompatibilityFallback(primary: Request, fallback: Request): String {
+        return try {
+            execute(primary)
+        } catch (e: IOException) {
+            val message = e.message.orEmpty()
+            if (message.contains("Admin API 404") || message.contains("Admin API 405")) {
+                execute(fallback)
+            } else {
+                throw e
+            }
+        }
+    }
+
     private fun idFromFilter(filter: String): String? =
         Regex("(?:^|&)id=eq\\.([^&]+)").find(filter)?.groupValues?.getOrNull(1)
 
@@ -88,39 +107,50 @@ class PhpAdminClient {
         else -> throw IllegalArgumentException("Unsupported Laravel admin resource: $table")
     }
 
+    private fun legacyResourcePath(table: String, query: String = ""): String {
+        val params = mutableListOf("resource=${encode(table)}")
+        listOf("id", "product_id", "order_id", "key", "active").forEach { key ->
+            queryValue(query, key)?.let { params += "${key}=${encode(it)}" }
+        }
+        return "admin.php?${params.joinToString("&")}"
+    }
+
     fun get(table: String, query: String = "?select=*"): String {
         return when (table) {
             "product_variants" -> {
                 val productId = queryValue(query, "product_id")
-                val path = if (productId != null) "admin/products/${encode(productId)}" else "admin/products"
-                val raw = execute(request(path).get().build())
-                val root = json.parseToJsonElement(raw)
-                val data = if (root is JsonObject && root["data"] != null) root["data"] else root
-                val variants = if (data is JsonObject) data["variants"] ?: JsonArray(emptyList()) else JsonArray(emptyList())
-                variants.toString()
+                val suffix = productId?.let { "&product_id=${encode(it)}" } ?: ""
+                val primary = request("admin-data?resource=product_variants$suffix").get().build()
+                val fallback = request(legacyResourcePath("product_variants", query)).get().build()
+                normalizeData(executeWithCompatibilityFallback(primary, fallback))
             }
             "order_items" -> {
                 val orderId = queryValue(query, "order_id")
                 if (orderId == null) "[]" else {
-                    val raw = execute(request("admin/orders/${encode(orderId)}").get().build())
-                    val root = json.parseToJsonElement(raw)
-                    val data = if (root is JsonObject && root["data"] != null) root["data"] else root
-                    val items = if (data is JsonObject) data["items"] ?: JsonArray(emptyList()) else JsonArray(emptyList())
-                    items.toString()
+                    val primary = request("admin-data?resource=order_items&order_id=${encode(orderId)}").get().build()
+                    val fallback = request(legacyResourcePath("order_items", query)).get().build()
+                    normalizeData(executeWithCompatibilityFallback(primary, fallback))
                 }
             }
             "complaints" -> {
-                val raw = execute(request("complaints.php?action=admin-list").post("{}".toRequestBody(jsonMedia)).build())
-                normalizeData(raw)
+                val primary = request("admin-data?resource=complaints").get().build()
+                val fallback = request(legacyResourcePath("complaints", query)).get().build()
+                normalizeData(executeWithCompatibilityFallback(primary, fallback))
             }
-            "wishlists" -> "[]"
+            "wishlists" -> {
+                val primary = request("admin-data?resource=wishlists").get().build()
+                val fallback = request(legacyResourcePath("wishlists", query)).get().build()
+                normalizeData(executeWithCompatibilityFallback(primary, fallback))
+            }
             else -> {
-                val raw = execute(request(resourcePath(table)).get().build())
+                val primary = request(resourcePath(table)).get().build()
+                val fallback = request(legacyResourcePath(table, query)).get().build()
+                val raw = executeWithCompatibilityFallback(primary, fallback)
                 val array = Json.parseToJsonElement(normalizeData(raw)).jsonArray.toMutableList()
                 val id = queryValue(query, "id")
                 val key = when {
                     id != null -> "id"
-                    queryValue(query, "key") != null -> "setting_key"
+                    queryValue(query, "key") != null -> "key"
                     else -> null
                 }
                 val value = id ?: queryValue(query, "key")
@@ -132,7 +162,19 @@ class PhpAdminClient {
         }
     }
 
-    fun getWithBearer(table: String, query: String, accessToken: String): String = get(table, query)
+    fun getWithBearer(table: String, query: String, accessToken: String): String {
+        val path = when (table) {
+            "wishlists" -> "admin-data?resource=wishlists"
+            else -> resourcePath(table)
+        }
+        return execute(
+            Request.Builder()
+                .url("$baseUrl/$path")
+                .addHeader("Accept", "application/json")
+                .addHeader("Authorization", "Bearer $accessToken")
+                .get().build()
+        ).let(::normalizeData)
+    }
 
     fun post(table: String, jsonBody: String): String {
         val path = when (table) {
@@ -144,7 +186,11 @@ class PhpAdminClient {
             else -> throw IllegalArgumentException("Unsupported Laravel POST resource: $table")
         }
         val b = request(path).addHeader("Content-Type", "application/json")
-        return execute(b.post(jsonBody.toRequestBody(jsonMedia)).build()).let(::normalizeData)
+        val primary = b.post(jsonBody.toRequestBody(jsonMedia)).build()
+        val fallback = request("admin-data?resource=${encode(table)}&action=save")
+            .addHeader("Content-Type", "application/json")
+            .post(jsonBody.toRequestBody(jsonMedia)).build()
+        return executeWithCompatibilityFallback(primary, fallback).let(::normalizeData)
     }
 
     fun patch(table: String, filter: String, jsonBody: String): String {
@@ -161,16 +207,27 @@ class PhpAdminClient {
             "product_variants" -> "manage.php?resource=variants&action=save"
             else -> throw IllegalArgumentException("Unsupported Laravel PATCH resource: $table")
         }
-        val method = if (table == "site_settings" || table == "complaints" || table == "product_variants") "POST" else "PATCH"
+        val method = when (table) {
+            "site_settings", "complaints", "product_variants" -> if (table == "site_settings") "PUT" else "POST"
+            else -> "PATCH"
+        }
         val b = request(path).addHeader("Content-Type", "application/json")
         val body = if (table == "complaints" && id != null) {
             val obj = json.parseToJsonElement(jsonBody).jsonObject.toMutableMap()
             obj["id"] = kotlinx.serialization.json.JsonPrimitive(id)
             JsonObject(obj).toString()
         } else jsonBody
-        val req = if (method == "POST") b.post(body.toRequestBody(jsonMedia)).build()
-        else b.patch(body.toRequestBody(jsonMedia)).build()
-        return execute(req).let(::normalizeData)
+        val req = when (method) {
+            "POST" -> b.post(body.toRequestBody(jsonMedia)).build()
+            "PUT" -> b.put(body.toRequestBody(jsonMedia)).build()
+            else -> b.patch(body.toRequestBody(jsonMedia)).build()
+        }
+        val fallbackPath = buildString {
+            append("admin-data?resource=").append(encode(table)).append("&action=save")
+            if (!id.isNullOrBlank()) append("&id=").append(encode(id))
+        }
+        val fallback = request(fallbackPath).addHeader("Content-Type", "application/json").post(body.toRequestBody(jsonMedia)).build()
+        return executeWithCompatibilityFallback(req, fallback).let(::normalizeData)
     }
 
     fun delete(table: String, filter: String): String {
@@ -184,17 +241,39 @@ class PhpAdminClient {
             else -> throw IllegalArgumentException("Unsupported Laravel DELETE resource: $table")
         }
         val req = request(path).delete().build()
-        return execute(req).let(::normalizeData)
+        val fallback = request("admin-data?resource=${encode(table)}&action=delete&id=${encode(id)}").delete().build()
+        return executeWithCompatibilityFallback(req, fallback).let(::normalizeData)
     }
 
     fun signIn(email: String, password: String): String {
         val body = "{\"identifier\":${jsonString(email)},\"password\":${jsonString(password)}}"
-        return execute(
-            Request.Builder().url("$baseUrl/auth/login")
-                .addHeader("Accept", "application/json")
-                .addHeader("Content-Type", "application/json")
-                .post(body.toRequestBody(jsonMedia)).build()
-        )
+        val primary = Request.Builder().url("$baseUrl/auth/login")
+            .addHeader("Accept", "application/json")
+            .addHeader("Content-Type", "application/json")
+            .post(body.toRequestBody(jsonMedia)).build()
+        val legacyBody = "{\"email\":${jsonString(email)},\"password\":${jsonString(password)}}"
+        val fallback = Request.Builder().url("$baseUrl/admin.php?action=login")
+            .addHeader("Accept", "application/json")
+            .addHeader("Content-Type", "application/json")
+            .post(legacyBody.toRequestBody(jsonMedia)).build()
+        val raw = executeWithCompatibilityFallback(primary, fallback)
+        val root = json.parseToJsonElement(raw).jsonObject
+        val data = (root["data"] as? JsonObject) ?: root
+        // The legacy PHP endpoint returns user_id/email/name beside the token.
+        // Normalize that shape so the rest of the app has one login contract.
+        if (data["access_token"] != null && data["user"] == null && data["user_id"] != null) {
+            val normalized = data.toMutableMap()
+            normalized["user"] = buildJsonObject {
+                put("id", data["user_id"]!!)
+                put("email", data["email"] ?: JsonPrimitive(email))
+                put("name", data["name"] ?: JsonPrimitive("Fol Bazar Admin"))
+                put("role", "admin")
+            }
+            val wrapped = if (root["data"] != null) root.toMutableMap().apply { put("data", JsonObject(normalized)) }
+            else normalized
+            return JsonObject(wrapped).toString()
+        }
+        return raw
     }
 
     private fun jsonString(s: String) = "\"" + s.replace("\\", "\\\\").replace("\"", "\\\"") + "\""
