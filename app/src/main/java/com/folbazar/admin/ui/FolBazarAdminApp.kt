@@ -228,10 +228,10 @@ private fun DashboardShortcut(title: String, icon: ImageVector, modifier: Modifi
         item{AdminAction("অভিযোগ","অভিযোগ দেখা, নোট ও status পরিবর্তন",Icons.Default.ReportProblem){nav.navigate("complaints")}}
         item{AdminAction("কুপন / ডিসকাউন্ট","coupon code, percent/fixed discount, limit",Icons.Default.LocalOffer){nav.navigate("coupons")}}
         item{AdminAction("Wishlist","কোন পণ্য কতবার wishlist হয়েছে",Icons.Default.Favorite){nav.navigate("wishlist")}}
-        item{AdminAction("ওয়েবসাইট ব্যানার / ইভেন্ট","Hero, Promo ও Event banner যোগ, edit, active/off, delete ও server image",Icons.Default.Image){nav.navigate("banners")}}
+        item{AdminAction("ওয়েবসাইট ব্যানার","Hero, Promo ও Event banner যোগ, edit, active/off, delete ও server image",Icons.Default.Image){nav.navigate("banners")}}
         item{AdminAction("সেলস অ্যানালিটিক্স","Sales goal, আজকের অর্ডার, delivered revenue ও top products",Icons.Default.Analytics){nav.navigate("analytics")}}
         item{AdminAction("সেটিংস / App Update","অ্যাপ আপডেট চেক, ডাউনলোড ও ইনস্টল",Icons.Default.Settings){nav.navigate("settings")}}
-        item{Text("নিরাপত্তা: database RLS policy-ই চূড়ান্ত permission; app শুধু admin JWT দিয়ে কাজ করে.",style=MaterialTheme.typography.bodySmall,color=MaterialTheme.colorScheme.onSurfaceVariant)}
+        item{Text("নিরাপত্তা: Laravel admin middleware চূড়ান্ত permission; app শুধু authenticated admin token দিয়ে কাজ করে.",style=MaterialTheme.typography.bodySmall,color=MaterialTheme.colorScheme.onSurfaceVariant)}
     }
 }
 @Composable private fun AdminAction(title:String,desc:String,icon:ImageVector,onClick:()->Unit){Card(Modifier.fillMaxWidth().clickable(onClick=onClick)){Row(Modifier.padding(16.dp),verticalAlignment=Alignment.CenterVertically){Icon(icon,null,tint=MaterialTheme.colorScheme.primary);Spacer(Modifier.width(14.dp));Column(Modifier.weight(1f)){Text(title,fontWeight=FontWeight.Bold);Text(desc,style=MaterialTheme.typography.bodySmall)};Icon(Icons.Default.ChevronRight,null)}}}
@@ -2011,7 +2011,6 @@ private fun BannerEditorDialog(
                 Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                     FilterChip(type == "hero", { type = "hero" }, label = { Text("Hero") })
                     FilterChip(type == "promo", { type = "promo" }, label = { Text("Promo") })
-                    FilterChip(type == "event", { type = "event" }, label = { Text("Event") })
                 }
                 Field(title, { title = it }, "Title")
                 Field(alt, { alt = it }, "Alt text")
@@ -2269,7 +2268,7 @@ private fun SettingsScreen(onLogout: () -> Unit) {
         if (uri != null) {
             logoUploading = true
             scope.launch {
-                ServerStorageClient(context).uploadImage(uri, "settings").fold(
+                ServerStorageClient(context).uploadImage(uri, "banners").fold(
                     { url -> logoUrl = url; Repository().saveSetting("logo_url", JsonPrimitive(url)) },
                     { message = it.message ?: "লোগো আপলোড ব্যর্থ" }
                 )
@@ -2334,7 +2333,7 @@ private fun SettingsScreen(onLogout: () -> Unit) {
                 Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
                     Text("অ্যাপ আপডেট", style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.Bold)
                     Text(
-                        "GitHub-এর update.json থেকে নতুন Admin APK-এর তথ্য যাচাই করা হয়। নতুন ভার্সন থাকলে এখান থেকেই নিরাপদভাবে ডাউনলোড ও ইনস্টল করা যাবে।",
+                        "cPanel-এর update.json থেকে নতুন Admin APK-এর তথ্য যাচাই করা হয়। নতুন ভার্সন থাকলে এখান থেকেই নিরাপদভাবে ডাউনলোড ও ইনস্টল করা যাবে।",
                         style = MaterialTheme.typography.bodyMedium
                     )
 
@@ -2432,7 +2431,7 @@ private fun SettingsScreen(onLogout: () -> Unit) {
             Card(Modifier.fillMaxWidth()) {
                 Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
                     Text("আপডেট কীভাবে কাজ করবে", fontWeight = FontWeight.Bold)
-                    Text("1. নতুন GitHub Release হলে update.json-এর মাধ্যমে অ্যাপ সেটি শনাক্ত করবে।")
+                    Text("1. cPanel-এর update.json-এ নতুন ভার্সন প্রকাশ হলে অ্যাপ সেটি শনাক্ত করবে।")
                     Text("2. নতুন ভার্সন থাকলে এই পেজে দেখাবে।")
                     Text("3. ডাউনলোডে চাপলে অগ্রগতি (%) দেখা যাবে।")
                     Text("4. ডাউনলোড শেষ হলে এখানেই Install বাটন আসবে।")

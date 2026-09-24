@@ -13,8 +13,6 @@ val localProperties = Properties().apply {
 }
 fun prop(n: String): String = localProperties.getProperty(n, "")
 
-val DEFAULT_ADMIN_API_BASE_URL = "https://lakebazar.com/api"
-
 android {
     namespace="com.folbazar.admin"
     compileSdk=35
@@ -22,9 +20,13 @@ android {
         applicationId="com.folbazar.admin"
         minSdk=26
         targetSdk=35
-        val runNumber = System.getenv("GITHUB_RUN_NUMBER")?.toIntOrNull() ?: 1
-        versionCode=runNumber
-        versionName="1.1.$runNumber"
+        val versionCodeValue = (System.getenv("APP_VERSION_CODE")?.toIntOrNull()
+            ?: prop("APP_VERSION_CODE").toIntOrNull() ?: 1).coerceAtLeast(1)
+        val versionNameValue = System.getenv("APP_VERSION_NAME")?.takeIf { it.isNotBlank() }
+            ?: prop("APP_VERSION_NAME").takeIf { it.isNotBlank() }
+            ?: "1.1.$versionCodeValue"
+        versionCode=versionCodeValue
+        versionName=versionNameValue
     }
     buildFeatures { compose=true; buildConfig=true }
     // Legacy Bus Terminal sources remain in the repository for history, but must not
@@ -32,14 +34,22 @@ android {
     sourceSets["main"].java.exclude("com/example/**")
     kotlin.sourceSets.getByName("main").kotlin.exclude("com/example/**")
     buildTypes {
-        debug { buildConfigField("String","ADMIN_API_BASE_URL","\"${prop("ADMIN_API_BASE_URL").ifBlank { DEFAULT_ADMIN_API_BASE_URL }}\"") }
+        debug {
+            buildConfigField("String","ADMIN_API_BASE_URL","\"${prop("ADMIN_API_BASE_URL").ifBlank { "https://lakebazar.com/api" }}\"")
+            buildConfigField("String","ADMIN_UPDATE_BASE_URL","\"${prop("ADMIN_UPDATE_BASE_URL").ifBlank { "https://lakebazar.com/admin-app" }}\"")
+        }
         release {
             isMinifyEnabled=false
             proguardFiles(getDefaultProguardFile("proguard-android-optimize.txt"),"proguard-rules.pro")
             buildConfigField(
                 "String",
                 "ADMIN_API_BASE_URL",
-                "\"${System.getenv("ADMIN_API_BASE_URL")?.takeIf { it.isNotBlank() } ?: prop("ADMIN_API_BASE_URL").ifBlank { DEFAULT_ADMIN_API_BASE_URL }}\""
+                "\"${System.getenv("ADMIN_API_BASE_URL")?.takeIf { it.isNotBlank() } ?: prop("ADMIN_API_BASE_URL").ifBlank { "https://lakebazar.com/api" }}\""
+            )
+            buildConfigField(
+                "String",
+                "ADMIN_UPDATE_BASE_URL",
+                "\"${System.getenv("ADMIN_UPDATE_BASE_URL")?.takeIf { it.isNotBlank() } ?: prop("ADMIN_UPDATE_BASE_URL").ifBlank { "https://lakebazar.com/admin-app" }}\""
             )
         }
     }

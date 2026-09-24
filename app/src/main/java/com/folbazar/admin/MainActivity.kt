@@ -3,9 +3,7 @@ package com.folbazar.admin
 import android.os.Bundle
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
-import androidx.compose.foundation.isSystemInDarkTheme
 import com.folbazar.admin.data.Session
-import com.folbazar.admin.data.ThemePrefs
 import com.folbazar.admin.ui.FolBazarAdminApp
 import com.folbazar.admin.ui.theme.FolBazarTheme
 
@@ -14,16 +12,9 @@ class MainActivity : ComponentActivity() {
         super.onCreate(savedInstanceState)
 
         Session.init(this)
-        ThemePrefs.init(this)
 
         setContent {
-            val systemDark = isSystemInDarkTheme()
-            val useDark = when (ThemePrefs.mode) {
-                ThemePrefs.Mode.SYSTEM -> systemDark
-                ThemePrefs.Mode.LIGHT -> false
-                ThemePrefs.Mode.DARK -> true
-            }
-            FolBazarTheme(darkTheme = useDark) {
+            FolBazarTheme {
                 FolBazarAdminApp()
             }
         }

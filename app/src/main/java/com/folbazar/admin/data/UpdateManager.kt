@@ -22,9 +22,8 @@ import java.net.URL
 import java.util.zip.ZipFile
 
 /**
- * Checks GitHub Releases through a small update.json manifest and downloads the APK.
+ * Checks the cPanel-hosted update.json manifest and downloads the APK.
  * The APK is validated before Android's package installer is opened.
- * No storage-provider secret is used here.
  */
 data class AppUpdateInfo(
     val versionCode: Int,
@@ -50,9 +49,8 @@ data class DownloadState(
 )
 
 object UpdateManager {
-    private const val REPO = "nahid6714/Fall-bazar"
-    private const val UPDATE_JSON_URL =
-        "https://github.com/$REPO/releases/latest/download/update.json"
+    private val updateJsonUrl: String
+        get() = BuildConfig.ADMIN_UPDATE_BASE_URL.trim().trimEnd('/') + "/update.json"
     private const val APK_MIME = "application/vnd.android.package-archive"
 
     private fun httpGet(url: String, accept: String): HttpURLConnection =
@@ -68,11 +66,11 @@ object UpdateManager {
 
     suspend fun checkForUpdate(): UpdateResult = withContext(Dispatchers.IO) {
         try {
-            val conn = httpGet(UPDATE_JSON_URL, "application/json")
+            val conn = httpGet(updateJsonUrl, "application/json")
             try {
                 if (conn.responseCode !in 200..299) {
                     return@withContext UpdateResult.Error(
-                        "GitHub update JSON check failed: HTTP ${conn.responseCode}"
+                        "Update manifest check failed: HTTP ${conn.responseCode}"
                     )
                 }
 
@@ -82,12 +80,14 @@ object UpdateManager {
                 val versionName = root["versionName"]?.jsonPrimitive?.content.orEmpty()
                 val releaseName = root["releaseName"]?.jsonPrimitive?.content
                     ?: "Fol Bazar Admin $versionName"
-                val downloadUrl = root["downloadUrl"]?.jsonPrimitive?.content.orEmpty()
+                val rawDownloadUrl = root["downloadUrl"]?.jsonPrimitive?.content.orEmpty()
+                val downloadUrl = if (rawDownloadUrl.startsWith("http://", true) || rawDownloadUrl.startsWith("https://", true)) rawDownloadUrl
+                    else BuildConfig.ADMIN_UPDATE_BASE_URL.trim().trimEnd('/') + "/" + rawDownloadUrl.trimStart('/')
                 val releaseUrl = root["releaseUrl"]?.jsonPrimitive?.content.orEmpty()
 
                 if (versionCode <= 0 || downloadUrl.isBlank()) {
                     return@withContext UpdateResult.Error(
-                        "GitHub update JSON-এ version/APK তথ্য সঠিক নয়"
+                        "Update manifest-এ version/APK তথ্য সঠিক নয়"
                     )
                 }
 
@@ -145,7 +145,7 @@ object UpdateManager {
                 val contentType = conn.contentType.orEmpty().lowercase()
                 if (contentType.contains("text/html") || contentType.contains("text/plain")) {
                     return@withContext Result.failure(
-                        Exception("GitHub APK URL থেকে APK নয়, অন্য ধরনের ফাইল পাওয়া গেছে")
+                        Exception("Update server থেকে APK নয়, অন্য ধরনের ফাইল পাওয়া গেছে")
                     )
                 }
 
