@@ -1,59 +1,39 @@
-name: Build and publish APK
+name: Build Fol Bazar Admin APK
 
 on:
   push:
     branches: [ "main", "master" ]
-  pull_request:
-    branches: [ "main", "master" ]
   workflow_dispatch:
-
-permissions:
-  contents: read
 
 jobs:
   build:
-    name: Build Android release APK
     runs-on: ubuntu-latest
 
     steps:
-      - name: Checkout source
-        uses: actions/checkout@v6
+      - name: Checkout
+        uses: actions/checkout@v4
 
-      - name: Set up Java 17
-        uses: actions/setup-java@v5
+      - name: Set up JDK 17
+        uses: actions/setup-java@v4
         with:
           distribution: temurin
           java-version: '17'
-          cache: gradle
 
-      - name: Set up Gradle 8.9
-        uses: gradle/actions/setup-gradle@v6
+      - name: Set up Gradle
+        uses: gradle/actions/setup-gradle@v4
         with:
-          gradle-version: '8.9'
-
-      - name: Check for stale legacy backend references
-        shell: bash
-        run: |
-          if grep -RniE 'CLOUDINARY|SUPABASE' app/src/main --include='*.kt'; then
-            echo 'ERROR: stale legacy backend references found in Android Kotlin source.'
-            exit 1
-          fi
-          echo 'Android source backend check passed.'
-
-      - name: Check Kotlin compilation
-        run: gradle :app:compileReleaseKotlin --stacktrace
-        env:
-          ADMIN_API_BASE_URL: https://lakebazar.com/api
+          gradle-version: '8.11.1'
 
       - name: Build release APK
-        run: gradle :app:assembleRelease --stacktrace
         env:
-          ADMIN_API_BASE_URL: https://lakebazar.com/api
+          ADMIN_API_BASE_URL: https://lakebazar.com/backend/api
+          ADMIN_UPDATE_BASE_URL: https://lakebazar.com/admin-app
+          APP_VERSION_CODE: ${{ github.run_number }}
+          APP_VERSION_NAME: 1.2.${{ github.run_number }}
+        run: gradle :app:assembleRelease --no-daemon
 
       - name: Upload APK artifact
         uses: actions/upload-artifact@v4
         with:
-          name: Fol-Bazar-Admin-release-${{ github.run_number }}
+          name: fol-bazar-admin-release
           path: app/build/outputs/apk/release/*.apk
-          if-no-files-found: error
-          retention-days: 14

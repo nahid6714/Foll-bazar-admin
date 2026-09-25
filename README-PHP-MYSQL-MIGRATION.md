@@ -4,7 +4,7 @@ The Android Admin UI talks directly to the same PHP/MySQL database used by the L
 
 ## Production API
 
-`https://lakebazar.com/api`
+`https://lakebazar.com/backend/api`
 
 The API reads database credentials from the Laravel root `.env`.
 
@@ -24,6 +24,6 @@ With no cPanel Terminal, use the one-time `public/setup-admin.php` flow describe
 
 Set:
 
-`ADMIN_API_BASE_URL=https://lakebazar.com/api`
+`ADMIN_API_BASE_URL=https://lakebazar.com/backend/api`
 
 in `local.properties`, then build the release APK from this `admin_src` project.

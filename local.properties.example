@@ -1,4 +1,4 @@
-ADMIN_API_BASE_URL=https://lakebazar.com/api
+ADMIN_API_BASE_URL=https://lakebazar.com/backend/api
 ADMIN_UPDATE_BASE_URL=https://lakebazar.com/admin-app
 APP_VERSION_CODE=1
 APP_VERSION_NAME=1.1.1

@@ -10,7 +10,14 @@ class Repository(private val api: PhpAdminClient = PhpAdminClient()) {
     private fun i(o: JsonObject, vararg keys: String): Int? = keys.asSequence().mapNotNull { o[it]?.jsonPrimitive?.intOrNull }.firstOrNull()
     private fun b(o: JsonObject, vararg keys: String): Boolean? = keys.asSequence().mapNotNull { o[it]?.jsonPrimitive?.booleanOrNull }.firstOrNull()
     private fun sa(o: JsonObject, vararg keys: String): List<String> = keys.asSequence().mapNotNull { o[it] as? JsonArray }.firstOrNull()?.mapNotNull { it.jsonPrimitive.contentOrNull } ?: emptyList()
-    private fun array(text: String): JsonArray = Json.parseToJsonElement(text).let { el -> if (el is JsonArray) el else JsonArray(emptyList()) }
+    private fun array(text: String): JsonArray =
+        Json.parseToJsonElement(text).let { el ->
+            when (el) {
+                is JsonArray -> el
+                is JsonObject -> JsonArray(listOf(el))
+                else -> JsonArray(emptyList())
+            }
+        }
     private fun obj(text: String): JsonObject = Json.parseToJsonElement(text).jsonObject
 
     private fun parseCategory(o: JsonObject) = Category(s(o,"id")?:"",s(o,"name")?:"",s(o,"slug")?:"",s(o,"image_url"),s(o,"description"),b(o,"is_active")?:true,i(o,"sort_order")?:0)

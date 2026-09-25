@@ -35,7 +35,7 @@ android {
     kotlin.sourceSets.getByName("main").kotlin.exclude("com/example/**")
     buildTypes {
         debug {
-            buildConfigField("String","ADMIN_API_BASE_URL","\"${prop("ADMIN_API_BASE_URL").ifBlank { "https://lakebazar.com/api" }}\"")
+            buildConfigField("String","ADMIN_API_BASE_URL","\"${prop("ADMIN_API_BASE_URL").ifBlank { "https://lakebazar.com/backend/api" }}\"")
             buildConfigField("String","ADMIN_UPDATE_BASE_URL","\"${prop("ADMIN_UPDATE_BASE_URL").ifBlank { "https://lakebazar.com/admin-app" }}\"")
         }
         release {
@@ -44,7 +44,7 @@ android {
             buildConfigField(
                 "String",
                 "ADMIN_API_BASE_URL",
-                "\"${System.getenv("ADMIN_API_BASE_URL")?.takeIf { it.isNotBlank() } ?: prop("ADMIN_API_BASE_URL").ifBlank { "https://lakebazar.com/api" }}\""
+                "\"${System.getenv("ADMIN_API_BASE_URL")?.takeIf { it.isNotBlank() } ?: prop("ADMIN_API_BASE_URL").ifBlank { "https://lakebazar.com/backend/api" }}\""
             )
             buildConfigField(
                 "String",

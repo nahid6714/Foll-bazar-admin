@@ -43,7 +43,7 @@ class ServerStorageClient(private val context: Context) {
                 .build()
 
             val builder = Request.Builder()
-                .url("$baseUrl/upload")
+                .url("$baseUrl/upload.php")
                 .post(body)
                 .addHeader("Accept", "application/json")
             Session.accessToken?.takeIf { it.isNotBlank() }?.let {
