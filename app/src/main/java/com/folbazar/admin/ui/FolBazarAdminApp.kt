@@ -664,6 +664,7 @@ private fun ProductDialog(
     var hot by remember { mutableStateOf(initial?.hotDeal ?: false) }
     var uploading by remember { mutableStateOf(false) }
     var formError by remember { mutableStateOf<String?>(null) }
+    var localPreviewUris by remember { mutableStateOf<List<Uri>>(emptyList()) }
     var menu by remember { mutableStateOf(false) }
 
     var variants by remember { mutableStateOf<List<ProductVariant>>(emptyList()) }
@@ -678,6 +679,7 @@ private fun ProductDialog(
         ActivityResultContracts.GetMultipleContents()
     ) { uris ->
         if (uris.isNotEmpty()) {
+            localPreviewUris = uris
             uploading = true
             formError = null
             scope.launch {
@@ -685,7 +687,10 @@ private fun ProductDialog(
                 var failed: String? = null
                 uris.forEach { uri ->
                     ServerStorageClient(context).uploadImage(uri, "products").fold(
-                        { uploaded += it },
+                        {
+                            uploaded += it
+                            localPreviewUris = localPreviewUris.filterNot { pending -> pending == uri }
+                        },
                         { failed = it.message ?: "ছবি আপলোড ব্যর্থ" }
                     )
                 }
@@ -768,9 +773,28 @@ private fun ProductDialog(
                     color = MaterialTheme.colorScheme.onSurfaceVariant
                 )
 
-                if (galleryUrls.isNotEmpty()) {
+                if (galleryUrls.isNotEmpty() || localPreviewUris.isNotEmpty()) {
                     LazyRow(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                        items(galleryUrls, key = { it }) { url ->
+                        items(localPreviewUris, key = { "local:${it}" }) { uri ->
+                            Box(Modifier.size(92.dp)) {
+                                AsyncImage(
+                                    model = uri,
+                                    contentDescription = "Selected product image",
+                                    modifier = Modifier
+                                        .fillMaxSize()
+                                        .border(2.dp, MaterialTheme.colorScheme.primary, MaterialTheme.shapes.small),
+                                    contentScale = ContentScale.Crop
+                                )
+                                Surface(Modifier.align(Alignment.BottomCenter)) {
+                                    Text(
+                                        if (uploading) "আপলোড…" else "আপলোড হয়নি",
+                                        modifier = Modifier.padding(horizontal = 6.dp, vertical = 2.dp),
+                                        style = MaterialTheme.typography.labelSmall
+                                    )
+                                }
+                            }
+                        }
+                        items(galleryUrls, key = { "remote:$it" }) { url ->
                             Box(Modifier.size(92.dp)) {
                                 AsyncImage(
                                     model = url,
@@ -985,13 +1009,18 @@ private fun AdminImageControl(
     val scope = rememberCoroutineScope()
     var uploading by remember { mutableStateOf(false) }
     var uploadError by remember { mutableStateOf<String?>(null) }
+    var localPreviewUri by remember { mutableStateOf<Uri?>(null) }
     val picker = rememberLauncherForActivityResult(ActivityResultContracts.GetContent()) { uri ->
         if (uri != null) {
+            localPreviewUri = uri
             uploading = true
             uploadError = null
             scope.launch {
                 onUpload(uri).fold(
-                    { onImageUrlChange(it) },
+                    {
+                        onImageUrlChange(it)
+                        localPreviewUri = null
+                    },
                     { uploadError = it.message ?: "ছবি আপলোড ব্যর্থ" }
                 )
                 uploading = false
@@ -1023,13 +1052,23 @@ private fun AdminImageControl(
                 .padding(6.dp),
             contentAlignment = Alignment.Center
         ) {
-            if (imageUrl.isNotBlank()) {
+            val previewModel: Any? = localPreviewUri ?: imageUrl.takeIf { it.isNotBlank() }
+            if (previewModel != null) {
                 AsyncImage(
-                    model = imageUrl,
+                    model = previewModel,
                     contentDescription = label,
                     modifier = Modifier.fillMaxSize(),
                     contentScale = ContentScale.Fit
                 )
+                if (uploading) {
+                    Surface(Modifier.align(Alignment.BottomCenter)) {
+                        Text(
+                            "সার্ভারে আপলোড হচ্ছে…",
+                            modifier = Modifier.padding(horizontal = 10.dp, vertical = 4.dp),
+                            color = MaterialTheme.colorScheme.primary
+                        )
+                    }
+                }
             } else {
                 Column(horizontalAlignment = Alignment.CenterHorizontally) {
                     Icon(Icons.Default.Image, null, modifier = Modifier.size(42.dp), tint = MaterialTheme.colorScheme.onSurfaceVariant)
@@ -1048,7 +1087,7 @@ private fun AdminImageControl(
                 Text(if (uploading) "আপলোড হচ্ছে…" else "ছবি নির্বাচন / আপলোড")
             }
             OutlinedButton(
-                onClick = { onImageUrlChange("") },
+                onClick = { localPreviewUri = null; onImageUrlChange("") },
                 modifier = Modifier.weight(1f),
                 enabled = imageUrl.isNotBlank() && !uploading,
                 colors = ButtonDefaults.outlinedButtonColors(contentColor = MaterialTheme.colorScheme.error)

@@ -37,6 +37,7 @@ android {
         debug {
             buildConfigField("String","ADMIN_API_BASE_URL","\"${prop("ADMIN_API_BASE_URL").ifBlank { "https://lakebazar.com/backend/api" }}\"")
             buildConfigField("String","ADMIN_UPDATE_BASE_URL","\"${prop("ADMIN_UPDATE_BASE_URL").ifBlank { "https://lakebazar.com/admin-app" }}\"")
+            buildConfigField("String","ADMIN_UPDATE_MANIFEST_URL","\"${prop("ADMIN_UPDATE_MANIFEST_URL").ifBlank { "https://lakebazar.com/backend/api/update.php?action=manifest" }}\"")
         }
         release {
             isMinifyEnabled=false
@@ -50,6 +51,11 @@ android {
                 "String",
                 "ADMIN_UPDATE_BASE_URL",
                 "\"${System.getenv("ADMIN_UPDATE_BASE_URL")?.takeIf { it.isNotBlank() } ?: prop("ADMIN_UPDATE_BASE_URL").ifBlank { "https://lakebazar.com/admin-app" }}\""
+            )
+            buildConfigField(
+                "String",
+                "ADMIN_UPDATE_MANIFEST_URL",
+                "\"${System.getenv("ADMIN_UPDATE_MANIFEST_URL")?.takeIf { it.isNotBlank() } ?: prop("ADMIN_UPDATE_MANIFEST_URL").ifBlank { "https://lakebazar.com/backend/api/update.php?action=manifest" }}\""
             )
         }
     }

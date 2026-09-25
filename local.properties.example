@@ -4,3 +4,4 @@ APP_VERSION_CODE=1
 APP_VERSION_NAME=1.1.1
 # Copy to local.properties for local builds. Never commit local.properties.
 sdk.dir=/path/to/Android/Sdk
+ADMIN_UPDATE_MANIFEST_URL=https://lakebazar.com/backend/api/update.php?action=manifest

@@ -28,12 +28,36 @@ jobs:
         env:
           ADMIN_API_BASE_URL: https://lakebazar.com/backend/api
           ADMIN_UPDATE_BASE_URL: https://lakebazar.com/admin-app
+          ADMIN_UPDATE_MANIFEST_URL: https://lakebazar.com/backend/api/update.php?action=manifest
           APP_VERSION_CODE: ${{ github.run_number }}
           APP_VERSION_NAME: 1.2.${{ github.run_number }}
         run: gradle :app:assembleRelease --no-daemon
+
+      - name: Prepare direct-update bundle
+        env:
+          APP_VERSION_CODE: ${{ github.run_number }}
+          APP_VERSION_NAME: 1.2.${{ github.run_number }}
+        run: |
+          mkdir -p update-bundle
+          cp app/build/outputs/apk/release/*.apk update-bundle/FolBazar-Admin-${APP_VERSION_NAME}.apk
+          cat > update-bundle/update.json <<EOF
+          {
+            "versionCode": ${APP_VERSION_CODE},
+            "versionName": "${APP_VERSION_NAME}",
+            "releaseName": "Fol Bazar Admin ${APP_VERSION_NAME}",
+            "downloadUrl": "FolBazar-Admin-${APP_VERSION_NAME}.apk",
+            "releaseUrl": ""
+          }
+          EOF
 
       - name: Upload APK artifact
         uses: actions/upload-artifact@v4
         with:
           name: fol-bazar-admin-release
           path: app/build/outputs/apk/release/*.apk
+
+      - name: Upload direct-update bundle
+        uses: actions/upload-artifact@v4
+        with:
+          name: fol-bazar-admin-direct-update
+          path: update-bundle/

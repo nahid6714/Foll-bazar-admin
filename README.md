@@ -94,3 +94,7 @@ The admin app is aligned with the current public schema: products use `name`, `s
 
 ## Current backend
 This Admin uses the Fol Bazar PHP/MySQL API at `https://lakebazar.com/backend/api`. The runtime uses the Laravel API only. Images are uploaded to the website's own `/uploads/products/`, `/uploads/categories/`, or `/uploads/banners/` storage through `/backend/backend/api/upload.php`.
+
+## v15 direct update path
+
+The app first checks `https://lakebazar.com/backend/api/update.php?action=manifest`, which is intentionally outside the static website SPA rewrite. Put the matching `update.php`, `update.json`, and signed APK under `public_html/backend/api/` and `public_html/backend/updates/` as described in `SERVER-UPDATE/README.txt`.
