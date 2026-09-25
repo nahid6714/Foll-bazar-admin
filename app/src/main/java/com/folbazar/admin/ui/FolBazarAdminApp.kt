@@ -693,9 +693,7 @@ private fun ProductDialog(
                         },
                         { error ->
                             val name = uri.lastPathSegment?.substringAfterLast('/')?.takeLast(80) ?: "নির্বাচিত ছবি"
-                            failed = "ছবি আপলোড ব্যর্থ
-ফাইল: $name
-কারণ: ${error.message ?: "অজানা সমস্যা"}"
+                            failed = "ছবি আপলোড ব্যর্থ\nফাইল: $name\nকারণ: ${error.message ?: "অজানা সমস্যা"}"
                         }
                     )
                 }
