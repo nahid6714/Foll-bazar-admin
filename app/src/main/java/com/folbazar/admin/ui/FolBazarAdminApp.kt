@@ -44,6 +44,7 @@ import androidx.navigation.compose.*
 import coil.compose.AsyncImage
 import com.folbazar.admin.BuildConfig
 import com.folbazar.admin.data.*
+import com.folbazar.admin.ui.theme.ThemePrefs
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.delay
 import kotlinx.serialization.json.JsonPrimitive
@@ -74,7 +75,6 @@ fun FolBazarAdminApp() {
         NavItem("dashboard","ড্যাশবোর্ড",Icons.Default.Dashboard),
         NavItem("products","পণ্য",Icons.Default.Inventory2),
         NavItem("orders","অর্ডার",Icons.Default.ShoppingCart),
-        NavItem("analytics","অ্যানালিটিক্স",Icons.Default.Analytics),
         NavItem("more","আরও",Icons.Default.MoreHoriz)
     )
     Scaffold(
@@ -90,7 +90,14 @@ fun FolBazarAdminApp() {
         bottomBar = {
             NavigationBar(containerColor = MaterialTheme.colorScheme.surface) {
                 val current = nav.currentBackStackEntryAsState().value?.destination?.route
-                items.forEach { item -> NavigationBarItem(selected = current == item.route || (item.route == "more" && current in listOf("more","categories","customers","complaints","coupons","wishlist","banners","settings","analytics")), onClick = { nav.navigate(item.route) { launchSingleTop = true } }, icon = { Icon(item.icon,null) }, label = { Text(item.label) }, colors = NavigationBarItemDefaults.colors(selectedIconColor = MaterialTheme.colorScheme.primary, selectedTextColor = MaterialTheme.colorScheme.primary, indicatorColor = MaterialTheme.colorScheme.primaryContainer)) }
+                items.forEach { item ->
+                    val selected = when (item.route) {
+                        "orders" -> current == "orders" || current == "orders/today"
+                        "more" -> current in listOf("more","categories","customers","complaints","coupons","wishlist","banners","settings","sales")
+                        else -> current == item.route
+                    }
+                    NavigationBarItem(selected = selected, onClick = { nav.navigate(item.route) { launchSingleTop = true } }, icon = { Icon(item.icon,null) }, label = { Text(item.label) }, colors = NavigationBarItemDefaults.colors(selectedIconColor = MaterialTheme.colorScheme.primary, selectedTextColor = MaterialTheme.colorScheme.primary, indicatorColor = MaterialTheme.colorScheme.primaryContainer))
+                }
             }
         }
     ) { padding ->
@@ -98,7 +105,9 @@ fun FolBazarAdminApp() {
             composable("dashboard") { Dashboard(nav) }
             composable("products") { Products() }
             composable("orders") { Orders() }
-            composable("analytics") { Analytics() }
+            composable("orders/today") { Orders(initialFilter = "today") }
+            composable("sales") { DeliveredSales() }
+            composable("new-product") { NewProductScreen(nav) }
             composable("more") { More(nav) }
             composable("categories") { Categories() }
             composable("customers") { Customers() }
@@ -125,6 +134,8 @@ fun FolBazarAdminApp() {
     }
     val pending = orders.count { it.status in setOf("pending","confirmed","processing","packed") }
     val revenue = orders.filter { it.status == "delivered" }.sumOf { it.total }
+    val today = java.text.SimpleDateFormat("yyyy-MM-dd", java.util.Locale.US).format(java.util.Date())
+    val todayOrders = orders.count { it.createdAt?.take(10) == today }
     RefreshableList(refresh, { refresh++ }, contentPadding = PaddingValues(horizontal = 16.dp, vertical = 16.dp)) {
         item { Text("স্বাগতম 👋", style=MaterialTheme.typography.headlineSmall, fontWeight=FontWeight.Bold); Text("ফল বাজারের সম্পূর্ণ নিয়ন্ত্রণ কেন্দ্র") }
         item { Row(Modifier.fillMaxWidth(), horizontalArrangement=Arrangement.spacedBy(10.dp)) {
@@ -136,13 +147,13 @@ fun FolBazarAdminApp() {
             Stat("Pending",pending.toString(),Icons.Default.Pending,Modifier.weight(1f)) { nav.navigate("orders") { launchSingleTop = true } }
         } }
         item { Row(Modifier.fillMaxWidth(), horizontalArrangement=Arrangement.spacedBy(10.dp)) {
-            Stat("Delivered Sales","৳ ${money(revenue)}",Icons.Default.Payments,Modifier.weight(1f)) { nav.navigate("orders") { launchSingleTop = true } }
-            Stat("অভিযোগ",complaints.count{it.status=="open"}.toString(),Icons.Default.ReportProblem,Modifier.weight(1f)) { nav.navigate("complaints") { launchSingleTop = true } }
+            Stat("Delivered Sales","৳ ${money(revenue)}",Icons.Default.Payments,Modifier.weight(1f)) { nav.navigate("sales") { launchSingleTop = true } }
+            Stat("আজকের অর্ডার",todayOrders.toString(),Icons.Default.Today,Modifier.weight(1f)) { nav.navigate("orders/today") { launchSingleTop = true } }
         } }
-        item { Row(Modifier.fillMaxWidth(), horizontalArrangement=Arrangement.spacedBy(8.dp)) { FilledTonalButton({ nav.navigate("products") },Modifier.weight(1f)){Icon(Icons.Default.Add,null);Spacer(Modifier.width(4.dp));Text("পণ্য")}; FilledTonalButton({ nav.navigate("orders") },Modifier.weight(1f)){Icon(Icons.Default.ShoppingCart,null);Spacer(Modifier.width(4.dp));Text("অর্ডার")} } }
-        item {
-            Text("সব সেকশন", style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.Bold)
-        }
+        item { Row(Modifier.fillMaxWidth(), horizontalArrangement=Arrangement.spacedBy(8.dp)) {
+            FilledTonalButton({ nav.navigate("new-product") },Modifier.weight(1f)){Icon(Icons.Default.Add,null);Spacer(Modifier.width(4.dp));Text("পণ্য")}
+        } }
+        item { Text("সব সেকশন", style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.Bold) }
         item { Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(10.dp)) {
             DashboardShortcut("ক্যাটাগরি", Icons.Default.Category, Modifier.weight(1f)) { nav.navigate("categories") { launchSingleTop = true } }
             DashboardShortcut("কাস্টমার", Icons.Default.People, Modifier.weight(1f)) { nav.navigate("customers") { launchSingleTop = true } }
@@ -160,81 +171,55 @@ fun FolBazarAdminApp() {
     }
 }
 
-@Composable private fun Stat(title:String,value:String,icon:ImageVector,modifier:Modifier,onClick:()->Unit){
-    Card(modifier.clickable(onClick = onClick)) {
-        Column(Modifier.padding(14.dp)) {
-            Icon(icon,null,tint=MaterialTheme.colorScheme.primary)
-            Text(title)
-            Text(value,style=MaterialTheme.typography.titleLarge,fontWeight=FontWeight.Bold)
-        }
+@Composable private fun NewProductScreen(nav: NavHostController) {
+    val scope = rememberCoroutineScope()
+    var cats by remember { mutableStateOf<List<Category>>(emptyList()) }
+    var error by remember { mutableStateOf<String?>(null) }
+    LaunchedEffect(Unit) { cats = Repository().categories().getOrElse { error = it.message; emptyList() } }
+    ProductDialog(initial = null, cats = cats, onDismiss = { nav.popBackStack() }) { n,d,pr,op,st,ci,img,gal,f,fl,h ->
+        scope.launch { Repository().addProduct(n,d,pr,op,st,ci,img,gal,f,fl,h).fold({ nav.popBackStack() }, { error = it.message }) }
     }
+    error?.let { Text(it, color = MaterialTheme.colorScheme.error, modifier = Modifier.padding(16.dp)) }
 }
 
-
-@Composable
-private fun DashboardShortcut(title: String, icon: ImageVector, modifier: Modifier, onClick: () -> Unit) {
-    Card(modifier.fillMaxWidth().clickable(onClick = onClick)) {
-        Row(Modifier.fillMaxWidth().padding(12.dp), verticalAlignment = Alignment.CenterVertically) {
-            Icon(icon, null, tint = MaterialTheme.colorScheme.primary)
-            Spacer(Modifier.width(8.dp))
-            Text(title, fontWeight = FontWeight.SemiBold, modifier = Modifier.weight(1f))
-            Icon(Icons.Default.ChevronRight, null)
-        }
-    }
-}
-
-@Composable private fun Analytics() {
+@Composable private fun DeliveredSales() {
     var orders by remember { mutableStateOf<List<Order>>(emptyList()) }
-    var products by remember { mutableStateOf<List<Product>>(emptyList()) }
     var items by remember { mutableStateOf<List<OrderItem>>(emptyList()) }
-    var goal by remember { mutableStateOf("100000") }
-    var goalInput by remember { mutableStateOf("") }
     var error by remember { mutableStateOf<String?>(null) }
     var refresh by remember { mutableStateOf(0) }
-    val scope = rememberCoroutineScope()
     LaunchedEffect(refresh) {
-        val r = Repository()
-        val os = r.orders(); val ps = r.products()
-        orders = os.getOrNull().orEmpty(); products = ps.getOrNull().orEmpty()
+        val r = Repository(); val os = r.orders(); orders = os.getOrNull().orEmpty()
         val all = mutableListOf<OrderItem>()
-        orders.take(100).forEach { o -> r.orderItems(o.id).getOrNull()?.let { all += it } }
+        orders.filter { it.status == "delivered" }.forEach { o -> r.orderItems(o.id).getOrNull()?.let { all += it } }
         items = all
-        r.setting("sales_goal").getOrNull()?.jsonPrimitive?.contentOrNull?.toDoubleOrNull()?.let { goal = it.toLong().toString() }
-        error = os.exceptionOrNull()?.message ?: ps.exceptionOrNull()?.message
+        error = os.exceptionOrNull()?.message
     }
-    val delivered = orders.filter { it.status == "delivered" }
-    val revenue = delivered.sumOf { it.total }
-    val today = java.text.SimpleDateFormat("yyyy-MM-dd", java.util.Locale.US).format(java.util.Date())
-    val todayOrders = orders.count { it.createdAt?.take(10) == today }
-    val top = items.groupBy { it.productName }.mapValues { (_, xs) -> xs.sumOf { it.quantity } }.entries.sortedByDescending { it.value }.take(5)
-    val goalValue = goal.toDoubleOrNull() ?: 0.0
-    val progress = if (goalValue > 0) (revenue / goalValue).coerceIn(0.0, 1.0) else 0.0
-    LazyColumn(Modifier.fillMaxSize().padding(16.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
-        item { Text("সেলস অ্যানালিটিক্স", style = MaterialTheme.typography.headlineSmall, fontWeight = FontWeight.Bold); Text("আগের Admin Panel-এর dashboard analytics ও sales goal এখন Fol Bazar-এ") }
-        item { Row(Modifier.fillMaxWidth(), horizontalArrangement=Arrangement.spacedBy(10.dp)) { Stat("Delivered Sales", "৳ ${money(revenue)}", Icons.Default.Payments, Modifier.weight(1f)) {}; Stat("আজকের অর্ডার", todayOrders.toString(), Icons.Default.Today, Modifier.weight(1f)) {} } }
-        item { Card(Modifier.fillMaxWidth()) { Column(Modifier.padding(16.dp), verticalArrangement=Arrangement.spacedBy(8.dp)) { Text("মাসিক / সেলস Goal", fontWeight=FontWeight.Bold); Text("৳ ${money(revenue)} / ৳ ${money(goalValue)}"); LinearProgressIndicator(progress=progress.toFloat(), modifier=Modifier.fillMaxWidth()); Row(horizontalArrangement=Arrangement.spacedBy(8.dp), verticalAlignment=Alignment.CenterVertically) { OutlinedTextField(goalInput, {goalInput=it}, label={Text("Goal (৳)")}, keyboardOptions=KeyboardOptions(keyboardType=KeyboardType.Decimal), modifier=Modifier.weight(1f), singleLine=true); Button(onClick={ val v=goalInput.toDoubleOrNull(); if(v!=null){ goal=v.toString(); scope.launch { Repository().saveSetting("sales_goal", JsonPrimitive(v)) } } }){Text("সেভ")} } } } }
-        item { Text("Top Selling Products", style=MaterialTheme.typography.titleLarge, fontWeight=FontWeight.Bold) }
-        items(top.size) { index -> val e = top[index]; Card(Modifier.fillMaxWidth()) { Row(modifier=Modifier.fillMaxWidth().padding(14.dp), horizontalArrangement=Arrangement.SpaceBetween) { Text(e.key, modifier=Modifier.weight(1f)); Text("${e.value} pcs", fontWeight=FontWeight.Bold) } } }
-        error?.let { item { Text("ডাটা লোড সমস্যা: $it", color=MaterialTheme.colorScheme.error) } }
-        item { OutlinedButton(onClick={refresh++}, modifier=Modifier.fillMaxWidth()){Icon(Icons.Default.Refresh,null);Spacer(Modifier.width(6.dp));Text("রিফ্রেশ")} }
-    }
-}
-
-@Composable private fun More(nav:NavHostController){
-    LazyColumn(Modifier.fillMaxSize().padding(16.dp),verticalArrangement=Arrangement.spacedBy(12.dp)){
-        item{Text("অ্যাডমিন ম্যানেজমেন্ট",style=MaterialTheme.typography.headlineSmall,fontWeight=FontWeight.Bold);Text("ওয়েবসাইটের বাকি সব নিয়ন্ত্রণ এখান থেকে")}
-        item{AdminAction("ক্যাটাগরি","ক্যাটাগরি যোগ, এডিট, active/off, delete",Icons.Default.Category){nav.navigate("categories")}}
-        item{AdminAction("কাস্টমার","প্রোফাইল ও customer/reseller/seller/admin role",Icons.Default.People){nav.navigate("customers")}}
-        item{AdminAction("অভিযোগ","অভিযোগ দেখা, নোট ও status পরিবর্তন",Icons.Default.ReportProblem){nav.navigate("complaints")}}
-        item{AdminAction("কুপন / ডিসকাউন্ট","coupon code, percent/fixed discount, limit",Icons.Default.LocalOffer){nav.navigate("coupons")}}
-        item{AdminAction("Wishlist","কোন পণ্য কতবার wishlist হয়েছে",Icons.Default.Favorite){nav.navigate("wishlist")}}
-        item{AdminAction("ওয়েবসাইট ব্যানার","Hero, Promo ও Event banner যোগ, edit, active/off, delete ও server image",Icons.Default.Image){nav.navigate("banners")}}
-        item{AdminAction("সেলস অ্যানালিটিক্স","Sales goal, আজকের অর্ডার, delivered revenue ও top products",Icons.Default.Analytics){nav.navigate("analytics")}}
-        item{AdminAction("সেটিংস / App Update","অ্যাপ আপডেট চেক, ডাউনলোড ও ইনস্টল",Icons.Default.Settings){nav.navigate("settings")}}
-        item{Text("নিরাপত্তা: Laravel admin middleware চূড়ান্ত permission; app শুধু authenticated admin token দিয়ে কাজ করে.",style=MaterialTheme.typography.bodySmall,color=MaterialTheme.colorScheme.onSurfaceVariant)}
+    val revenue = orders.filter { it.status == "delivered" }.sumOf { it.total }
+    val groups = items.groupBy { it.productId ?: "name:${it.productName}" }.map { (_, xs) ->
+        val first = xs.first(); Triple(first.productName, xs.sumOf { it.quantity }, xs.sumOf { it.lineTotal })
+    }.sortedWith(compareByDescending<Triple<String,Int,Double>> { it.second }.thenByDescending { it.third })
+    Column(Modifier.fillMaxSize().padding(16.dp)) {
+        Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
+            Column(Modifier.weight(1f)) { Text("Delivered Sales", style=MaterialTheme.typography.headlineSmall, fontWeight=FontWeight.Bold); Text("শুধু delivered order-এর product-wise sales") }
+            IconButton({ refresh++ }) { Icon(Icons.Default.Refresh, "রিফ্রেশ") }
+        }
+        Spacer(Modifier.height(10.dp))
+        Card(Modifier.fillMaxWidth()) { Column(Modifier.padding(16.dp), verticalArrangement=Arrangement.spacedBy(5.dp)) { Text("সর্বমোট Delivered Sales", fontWeight=FontWeight.Bold); Text("৳ ${money(revenue)}", style=MaterialTheme.typography.headlineMedium, fontWeight=FontWeight.Bold); Text("${orders.count { it.status == "delivered" }}টি delivered order") } }
+        Spacer(Modifier.height(10.dp))
+        Text("সবচেয়ে বেশি বিক্রি হওয়া পণ্য", style=MaterialTheme.typography.titleLarge, fontWeight=FontWeight.Bold)
+        error?.let { Text(it, color=MaterialTheme.colorScheme.error) }
+        LazyColumn(Modifier.fillMaxSize(), verticalArrangement=Arrangement.spacedBy(8.dp), contentPadding=PaddingValues(vertical=8.dp)) {
+            itemsIndexed(groups) { index, g ->
+                Card(Modifier.fillMaxWidth()) { Row(Modifier.fillMaxWidth().padding(14.dp), verticalAlignment=Alignment.CenterVertically) {
+                    Text("${index+1}", fontWeight=FontWeight.Bold, modifier=Modifier.width(32.dp))
+                    Column(Modifier.weight(1f)) { Text(g.first, fontWeight=FontWeight.Bold); Text("বিক্রি: ${g.second} টি") }
+                    Text("৳ ${money(g.third)}", fontWeight=FontWeight.Bold)
+                } }
+            }
+            if (groups.isEmpty()) item { EmptyState("এখনও delivered product sales নেই") }
+        }
     }
 }
-@Composable private fun AdminAction(title:String,desc:String,icon:ImageVector,onClick:()->Unit){Card(Modifier.fillMaxWidth().clickable(onClick=onClick)){Row(Modifier.padding(16.dp),verticalAlignment=Alignment.CenterVertically){Icon(icon,null,tint=MaterialTheme.colorScheme.primary);Spacer(Modifier.width(14.dp));Column(Modifier.weight(1f)){Text(title,fontWeight=FontWeight.Bold);Text(desc,style=MaterialTheme.typography.bodySmall)};Icon(Icons.Default.ChevronRight,null)}}}
 
 @OptIn(ExperimentalFoundationApi::class)
 @Composable
@@ -1650,13 +1635,14 @@ private fun OrderDetailsDialog(
 
 
 @Composable
-private fun Orders() {
+private fun Orders(initialFilter: String? = null) {
     val scope = rememberCoroutineScope()
     var list by remember { mutableStateOf<List<Order>>(emptyList()) }
     var error by remember { mutableStateOf<String?>(null) }
     var refresh by remember { mutableStateOf(0) }
     var loading by remember { mutableStateOf(true) }
     var selected by remember { mutableStateOf<Order?>(null) }
+    var filter by remember { mutableStateOf(initialFilter ?: "all") }
 
     LaunchedEffect(refresh) {
         loading = true
@@ -1678,6 +1664,23 @@ private fun Orders() {
             }
         }
         Spacer(Modifier.height(10.dp))
+        Row(Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()), horizontalArrangement=Arrangement.spacedBy(8.dp)) {
+            listOf("all" to "সব", "today" to "আজ", "yesterday" to "গতকাল", "week" to "এই সপ্তাহ", "month" to "এই মাস").forEach { (key,label) ->
+                FilterChip(selected = filter == key, onClick = { filter = key }, label = { Text(label) })
+            }
+        }
+        val now = java.time.LocalDate.now()
+        val filtered = list.filter { o ->
+            val d = runCatching { java.time.LocalDate.parse(o.createdAt?.take(10) ?: "") }.getOrNull()
+            when (filter) {
+                "today" -> d == now
+                "yesterday" -> d == now.minusDays(1)
+                "week" -> d != null && !d.isBefore(now.minusDays(6)) && !d.isAfter(now)
+                "month" -> d?.year == now.year && d.monthValue == now.monthValue
+                else -> true
+            }
+        }
+        Text("${filtered.size}টি অর্ডার", style=MaterialTheme.typography.bodySmall, color=MaterialTheme.colorScheme.onSurfaceVariant)
         error?.let { Text(it, color = MaterialTheme.colorScheme.error) }
 
         RefreshableList(refresh, { refresh++ }) {
@@ -1687,7 +1690,7 @@ private fun Orders() {
                 item { EmptyState(if (error != null) "অর্ডারের ডাটা লোড হয়নি" else "এখনও কোনো অর্ডার আসেনি") }
             }
 
-            items(list, key = { it.id }) { o ->
+            items(filtered, key = { it.id }) { o ->
                 Card(
                     Modifier.fillMaxWidth().clickable { selected = o },
                     colors = CardDefaults.cardColors(
@@ -2039,6 +2042,7 @@ private fun Banners() {
     val scope = rememberCoroutineScope()
     val context = LocalContext.current
     var list by remember { mutableStateOf<List<SiteBanner>>(emptyList()) }
+    var categories by remember { mutableStateOf<List<Category>>(emptyList()) }
     var error by remember { mutableStateOf<String?>(null) }
     var selected by remember { mutableStateOf<SiteBanner?>(null) }
     var showEditor by remember { mutableStateOf(false) }
@@ -2047,7 +2051,9 @@ private fun Banners() {
 
     LaunchedEffect(refresh) {
         loading = true
-        Repository().banners().fold({ list = it; error = null }, { error = it.message })
+        val repo = Repository()
+        repo.banners().fold({ list = it; error = null }, { error = it.message })
+        categories = repo.categories().getOrNull().orEmpty()
         loading = false
     }
 
@@ -2071,7 +2077,7 @@ private fun Banners() {
                         Row(verticalAlignment = Alignment.CenterVertically) {
                             Column(Modifier.weight(1f)) {
                                 Text(b.title?.ifBlank { null } ?: "ব্যানার", fontWeight = FontWeight.Bold)
-                                Text("${b.bannerType.uppercase()} • ${if (b.active) "Active" else "Off"} • Sort ${b.sortOrder}", style = MaterialTheme.typography.bodySmall)
+                                Text("${b.bannerType.uppercase()} • ${if (b.active) "Active" else "Off"} • ${b.categoryName ?: categories.firstOrNull { it.id == b.categoryId }?.name ?: "সব ক্যাটাগরি"}", style = MaterialTheme.typography.bodySmall)
                             }
                             TextButton(onClick = { selected = b; showEditor = true }) { Text("এডিট") }
                             TextButton(onClick = {
@@ -2085,13 +2091,13 @@ private fun Banners() {
     }
 
     if (showEditor) {
-        BannerEditorDialog(initial = selected, onDismiss = { showEditor = false }) { bannerType, title, altText, imageUrl, linkUrl, sortOrder, active, widthPercent, heightPx ->
+        BannerEditorDialog(initial = selected, categories = categories, onDismiss = { showEditor = false }) { bannerType, title, altText, imageUrl, linkUrl, categoryId, sortOrder, active, widthPercent, heightPx ->
             scope.launch {
                 val repo = Repository()
                 val result = if (selected == null) {
-                    repo.addBanner(bannerType, title, altText, imageUrl, linkUrl, sortOrder, widthPercent, heightPx)
+                    repo.addBanner(bannerType, title, altText, imageUrl, linkUrl, categoryId, sortOrder, widthPercent, heightPx)
                 } else {
-                    repo.updateBanner(selected!!.copy(bannerType = bannerType, title = title, altText = altText, imageUrl = imageUrl, linkUrl = linkUrl, sortOrder = sortOrder, active = active, widthPercent = widthPercent, heightPx = heightPx))
+                    repo.updateBanner(selected!!.copy(bannerType = bannerType, title = title, altText = altText, imageUrl = imageUrl, linkUrl = linkUrl, categoryId = categoryId, categoryName = categories.firstOrNull { it.id == categoryId }?.name, sortOrder = sortOrder, active = active, widthPercent = widthPercent, heightPx = heightPx))
                 }
                 result.fold({ showEditor = false; refresh++ }, { error = it.message })
             }
@@ -2102,8 +2108,9 @@ private fun Banners() {
 @Composable
 private fun BannerEditorDialog(
     initial: SiteBanner?,
+    categories: List<Category>,
     onDismiss: () -> Unit,
-    onSave: (String, String?, String, String, String?, Int, Boolean, Int, Int) -> Unit
+    onSave: (String, String?, String, String, String?, String?, Int, Boolean, Int, Int) -> Unit
 ) {
     val context = LocalContext.current
     var type by remember { mutableStateOf(initial?.bannerType ?: "hero") }
@@ -2111,6 +2118,8 @@ private fun BannerEditorDialog(
     var alt by remember { mutableStateOf(initial?.altText ?: "ফল বাজার ব্যানার") }
     var imageUrl by remember { mutableStateOf(initial?.imageUrl ?: "") }
     var link by remember { mutableStateOf(initial?.linkUrl ?: "") }
+    var categoryId by remember { mutableStateOf(initial?.categoryId) }
+    var categoryMenu by remember { mutableStateOf(false) }
     var sort by remember { mutableStateOf(initial?.sortOrder?.toString() ?: "0") }
     var active by remember { mutableStateOf(initial?.active ?: true) }
     var uploadError by remember { mutableStateOf<String?>(null) }
@@ -2145,7 +2154,7 @@ private fun BannerEditorDialog(
         title = if (initial == null) "নতুন ব্যানার" else "ব্যানার এডিট",
         confirmEnabled = imageUrl.isNotBlank() && sort.toIntOrNull() != null && !uploading,
         onConfirm = {
-            onSave(type, title.trim().ifBlank { null }, alt.trim().ifBlank { "ফল বাজার ব্যানার" }, imageUrl.trim(), link.trim().ifBlank { null }, sort.toIntOrNull() ?: 0, active, widthPercent.toInt(), heightPx.toInt())
+            onSave(type, title.trim().ifBlank { null }, alt.trim().ifBlank { "ফল বাজার ব্যানার" }, imageUrl.trim(), link.trim().ifBlank { null }, categoryId, sort.toIntOrNull() ?: 0, active, widthPercent.toInt(), heightPx.toInt())
         }
     ) {
                 Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
@@ -2204,6 +2213,18 @@ private fun BannerEditorDialog(
                         }
                     }
                 }
+                Box {
+                    OutlinedButton(onClick = { categoryMenu = true }, modifier = Modifier.fillMaxWidth()) {
+                        Text(categories.firstOrNull { it.id == categoryId }?.name ?: "Product Category নির্বাচন")
+                    }
+                    DropdownMenu(expanded = categoryMenu, onDismissRequest = { categoryMenu = false }) {
+                        DropdownMenuItem(text = { Text("সব ক্যাটাগরি") }, onClick = { categoryId = null; categoryMenu = false })
+                        categories.forEach { category ->
+                            DropdownMenuItem(text = { Text(category.name) }, onClick = { categoryId = category.id; categoryMenu = false })
+                        }
+                    }
+                }
+                Text("এই category নির্বাচন করলে website banner কোন product category-এর আগে দেখাবে তা নির্ধারণ করা যাবে।", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
                 Field(link, { link = it }, "Link URL (optional)")
                 Field(sort, { sort = it }, "Sort order", KeyboardType.Number)
                 SwitchRow("Active", active) { active = it }

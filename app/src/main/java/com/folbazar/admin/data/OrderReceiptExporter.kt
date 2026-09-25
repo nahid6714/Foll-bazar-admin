@@ -4,246 +4,120 @@ import android.app.Activity
 import android.content.Context
 import android.content.ContextWrapper
 import android.content.Intent
-import android.graphics.Bitmap
-import android.graphics.Canvas
-import android.graphics.Color
+import android.graphics.*
 import android.graphics.pdf.PdfDocument
-import android.view.View
-import android.view.ViewGroup
-import android.webkit.WebView
-import android.webkit.WebViewClient
-import android.widget.FrameLayout
 import androidx.core.content.FileProvider
 import java.io.File
 import java.io.FileOutputStream
-import kotlin.coroutines.resume
-import kotlinx.coroutines.Dispatchers
-import kotlinx.coroutines.delay
-import kotlinx.coroutines.suspendCancellableCoroutine
-import kotlinx.coroutines.withContext
+import java.text.SimpleDateFormat
+import java.util.Date
+import java.util.Locale
 
-/**
- * Renders a single order as a receipt (same design for every size - see
- * ReceiptHtmlBuilder) and exports it as a PDF or PNG at a chosen
- * [ReceiptPaperSize]. Both formats are produced by loading the receipt HTML
- * into an off-screen WebView, so the PDF/PNG always match each other and the
- * in-app preview pixel for pixel.
- */
+/** Robust receipt exporter. Files are written inside a FileProvider-approved cache path. */
+enum class ReceiptPaperSize(val label: String, val widthPx: Int, val pageHeightPx: Int) {
+    A4("A4", 794, 1123),
+    A5("A5", 559, 794),
+    THERMAL_80("থার্মাল ৮০মিমি", 384, 900),
+    THERMAL_58("থার্মাল ৫৮মিমি", 280, 900)
+}
+
 object OrderReceiptExporter {
-
-    // ---------------------------------------------------------------
-    // Public API
-    // ---------------------------------------------------------------
-
-    suspend fun exportPdf(
-        activity: Activity,
-        order: Order,
-        items: List<OrderItem>,
-        size: ReceiptPaperSize
-    ): File = withContext(Dispatchers.Main) {
-        val webView = createWebView(activity)
-        try {
-            val html = ReceiptHtmlBuilder.build(order, items, size)
-            attach(activity, webView, size.widthCssPx, size.heightCssPx ?: 1200)
-            webView.loadHtmlSuspend(html)
-
-            val measuredHeight = webView.measureContentHeightPx()
-            val contentHeightPx = maxOf(measuredHeight, size.heightCssPx ?: 1, 1)
-            webView.scrollTo(0, 0)
-            val pageHeightMm = size.heightMm ?: (
-                ReceiptPaperSize.cssPxToMm(measuredHeight.coerceAtLeast(1).toFloat()) + 4f
-            )
-
-            webView.measure(
-                View.MeasureSpec.makeMeasureSpec(size.widthCssPx, View.MeasureSpec.EXACTLY),
-                View.MeasureSpec.makeMeasureSpec(contentHeightPx, View.MeasureSpec.EXACTLY)
-            )
-            webView.layout(0, 0, size.widthCssPx, contentHeightPx)
-            webView.requestLayout()
-            // Give Chromium one render pass before we capture the view.
-            // Wait for the WebView layout/paint pipeline (including font/layout reflow).
-            delay(350)
-
-            // Render the WebView to a bitmap first. Drawing the WebView directly to
-            // PdfDocument can produce a blank page on some Android/WebView versions.
-            // The bitmap path is reliable and also keeps PDF and PNG output identical.
-            webView.scrollTo(0, 0)
-            delay(150)
-            val bitmap = renderWebView(webView, size.widthCssPx, contentHeightPx)
-            try {
-                val file = File(exportsDir(activity), "order-${order.orderNumber}-${size.name.lowercase()}.pdf")
-                bitmap.writePdfToFile(size.widthMm, pageHeightMm, size.heightMm != null, file)
-                file
-            } finally {
-                bitmap.recycle()
-            }
-        } finally {
-            detach(webView)
+    fun findActivity(context: Context): Activity? {
+        var current: Context? = context
+        while (current is ContextWrapper) {
+            if (current is Activity) return current
+            current = current.baseContext
         }
+        return current as? Activity
     }
 
-    suspend fun exportImage(
-        activity: Activity,
-        order: Order,
-        items: List<OrderItem>,
-        size: ReceiptPaperSize,
-        scale: Int = 2
-    ): File = withContext(Dispatchers.Main) {
-        val webView = createWebView(activity)
-        try {
-            val html = ReceiptHtmlBuilder.build(order, items, size)
-            attach(activity, webView, size.widthCssPx, size.heightCssPx ?: 1200)
-            webView.loadHtmlSuspend(html)
+    private fun receiptDir(context: Context): File = File(context.cacheDir, "receipts").apply { mkdirs() }
 
-            val measuredHeight = webView.measureContentHeightPx()
-            val heightPx = maxOf(measuredHeight, size.heightCssPx ?: 1, 1)
-            webView.scrollTo(0, 0)
-            delay(150)
-            val bitmap = renderWebView(webView, size.widthCssPx, heightPx)
-            try {
-                val file = File(exportsDir(activity), "order-${order.orderNumber}-${size.name.lowercase()}.png")
-                FileOutputStream(file).use { bitmap.compress(Bitmap.CompressFormat.PNG, 100, it) }
-                file
-            } finally {
-                bitmap.recycle()
-            }
-        } finally {
-            detach(webView)
-        }
+    private fun paint(size: Float, bold: Boolean = false): Paint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
+        color = Color.BLACK
+        textSize = size
+        typeface = if (bold) Typeface.DEFAULT_BOLD else Typeface.DEFAULT
     }
 
-    /** Opens the system share sheet, which also lets the user "Save to Downloads"/Drive/etc. */
-    fun shareFile(context: Context, file: File, mimeType: String) {
+    private fun lines(order: Order, items: List<OrderItem>): List<String> {
+        val out = mutableListOf<String>()
+        out += "ফল বাজার"
+        out += "অর্ডার #${order.orderNumber}"
+        out += "কাস্টমার: ${order.customer}"
+        out += "ফোন: ${order.phone}"
+        out += "তারিখ: ${order.createdAt ?: "-"}"
+        out += "--------------------------------"
+        items.forEach { item ->
+            val variant = item.variantLabel?.takeIf { it.isNotBlank() }?.let { " ($it)" } ?: ""
+            out += "${item.productName}$variant x${item.quantity}"
+            out += "৳ ${money(item.lineTotal)}"
+        }
+        out += "--------------------------------"
+        out += "Subtotal: ৳ ${money(order.subtotal)}"
+        out += "Delivery: ৳ ${money(order.deliveryCharge)}"
+        out += "Discount: ৳ ${money(order.discount)}"
+        out += "TOTAL: ৳ ${money(order.total)}"
+        out += "Payment: ${order.paymentMethod}"
+        out += "Status: ${order.status}"
+        return out
+    }
+
+    fun exportImage(activity: Activity, order: Order, items: List<OrderItem>, size: ReceiptPaperSize): File {
+        val width = size.widthPx
+        val textSize = if (width < 350) 22f else 24f
+        val rowHeight = (textSize * 1.65f).toInt()
+        val content = lines(order, items)
+        val height = maxOf(size.pageHeightPx, 80 + content.size * rowHeight)
+        val bitmap = Bitmap.createBitmap(width, height, Bitmap.Config.ARGB_8888)
+        val canvas = Canvas(bitmap)
+        canvas.drawColor(Color.WHITE)
+        val normal = paint(textSize)
+        val bold = paint(textSize, true)
+        var y = 45f
+        content.forEachIndexed { index, line ->
+            canvas.drawText(line, 24f, y, if (index == 0 || line.startsWith("TOTAL:")) bold else normal)
+            y += rowHeight
+        }
+        val file = File(receiptDir(activity), "receipt_${safe(order.orderNumber)}_${stamp()}.png")
+        FileOutputStream(file).use { bitmap.compress(Bitmap.CompressFormat.PNG, 100, it) }
+        bitmap.recycle()
+        return file
+    }
+
+    fun exportPdf(activity: Activity, order: Order, items: List<OrderItem>, size: ReceiptPaperSize): File {
+        val document = PdfDocument()
+        val pageWidth = size.widthPx
+        val pageHeight = maxOf(size.pageHeightPx, 80 + lines(order, items).size * 34)
+        val page = document.startPage(PdfDocument.PageInfo.Builder(pageWidth, pageHeight, 1).create())
+        val canvas = page.canvas
+        canvas.drawColor(Color.WHITE)
+        val content = lines(order, items)
+        val normal = paint(if (pageWidth < 350) 18f else 20f)
+        val bold = paint(if (pageWidth < 350) 18f else 20f, true)
+        var y = 36f
+        content.forEachIndexed { index, line ->
+            canvas.drawText(line, 18f, y, if (index == 0 || line.startsWith("TOTAL:")) bold else normal)
+            y += 30f
+        }
+        document.finishPage(page)
+        val file = File(receiptDir(activity), "receipt_${safe(order.orderNumber)}_${stamp()}.pdf")
+        FileOutputStream(file).use { document.writeTo(it) }
+        document.close()
+        return file
+    }
+
+    fun shareFile(context: Context, file: File, mime: String) {
+        require(file.exists()) { "Receipt file was not created" }
         val uri = FileProvider.getUriForFile(context, "${context.packageName}.fileprovider", file)
         val intent = Intent(Intent.ACTION_SEND).apply {
-            type = mimeType
+            type = mime
             putExtra(Intent.EXTRA_STREAM, uri)
             addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
         }
         context.startActivity(Intent.createChooser(intent, "রশিদ সেভ / শেয়ার করুন"))
     }
 
-    fun findActivity(context: Context): Activity? {
-        var c = context
-        while (c is ContextWrapper) {
-            if (c is Activity) return c
-            c = c.baseContext
-        }
-        return null
-    }
-
-    // ---------------------------------------------------------------
-    // WebView plumbing
-    // ---------------------------------------------------------------
-
-    private fun exportsDir(context: Context): File = File(context.cacheDir, "exports").apply { mkdirs() }
-
-    private fun createWebView(activity: Activity): WebView = WebView(activity).apply {
-        settings.javaScriptEnabled = true
-        settings.useWideViewPort = false
-        settings.loadWithOverviewMode = false
-        settings.textZoom = 100
-        settings.setSupportZoom(false)
-        settings.builtInZoomControls = false
-        settings.displayZoomControls = false
-        settings.defaultFontSize = 16
-        settings.defaultFixedFontSize = 16
-        setInitialScale(100)
-        setBackgroundColor(Color.WHITE)
-    }
-
-    /** Adds the WebView behind the visible Compose content so Chromium still rasterizes it. */
-    private fun attach(activity: Activity, webView: WebView, widthPx: Int, heightPx: Int) {
-        val root = activity.findViewById<ViewGroup>(android.R.id.content)
-        val lp = FrameLayout.LayoutParams(widthPx, heightPx.coerceAtLeast(1))
-        // Keep the WebView behind the Compose UI instead of translating it far
-        // off-screen. Some Android WebView implementations skip rasterization
-        // for completely off-screen views, which resulted in blank PDF pages.
-        root.addView(webView, 0, lp)
-    }
-
-    private fun renderWebView(webView: WebView, widthPx: Int, heightPx: Int): Bitmap {
-        val bitmap = Bitmap.createBitmap(widthPx, heightPx, Bitmap.Config.ARGB_8888)
-        val canvas = Canvas(bitmap)
-        canvas.drawColor(Color.WHITE)
-        webView.draw(canvas)
-        return bitmap
-    }
-
-    private fun detach(webView: WebView) {
-        (webView.parent as? ViewGroup)?.removeView(webView)
-        webView.destroy()
-    }
-
-    private suspend fun WebView.loadHtmlSuspend(html: String): Unit = suspendCancellableCoroutine { cont ->
-        webViewClient = object : WebViewClient() {
-            override fun onPageFinished(view: WebView?, url: String?) {
-                if (cont.isActive) cont.resume(Unit)
-            }
-        }
-        loadDataWithBaseURL(null, html, "text/html", "UTF-8", null)
-    }
-
-    /** Reads the receipt card's rendered height (in CSS px) so auto-height (thermal) pages can be sized exactly. */
-    private suspend fun WebView.measureContentHeightPx(): Int = suspendCancellableCoroutine { cont ->
-        post {
-            evaluateJavascript("document.getElementById('paper').scrollHeight.toString();") { result ->
-                val px = result?.trim('"')?.toDoubleOrNull()?.toInt() ?: 0
-                if (cont.isActive) cont.resume(px)
-            }
-        }
-    }
-
-    /**
-     * Writes the rendered receipt bitmap to a PDF.
-     *
-     * We intentionally do not use PrintDocumentAdapter here: recent Android SDKs
-     * expose LayoutResultCallback/WriteResultCallback constructors as package-private.
-     * Rendering to a bitmap first also avoids blank pages on some WebView versions.
-     */
-    private fun Bitmap.writePdfToFile(
-        widthMm: Float,
-        pageHeightMm: Float,
-        fixedHeight: Boolean,
-        outFile: File
-    ) {
-        val pageWidthPt = mmToPdfPoints(widthMm)
-        val pageHeightPt = mmToPdfPoints(pageHeightMm)
-        val pageHeightPx = ReceiptPaperSize.mmToCssPx(pageHeightMm).coerceAtLeast(1)
-        val pageCount = if (fixedHeight) {
-            ((height + pageHeightPx - 1) / pageHeightPx).coerceAtLeast(1)
-        } else {
-            1
-        }
-
-        val document = PdfDocument()
-        try {
-            val scaleX = pageWidthPt.toFloat() / width.toFloat()
-            for (pageNumber in 0 until pageCount) {
-                val pageInfo = PdfDocument.PageInfo.Builder(
-                    pageWidthPt,
-                    pageHeightPt,
-                    pageNumber + 1
-                ).create()
-                val page = document.startPage(pageInfo)
-                val canvas = page.canvas
-                canvas.drawColor(Color.WHITE)
-                canvas.save()
-                canvas.scale(scaleX, scaleX)
-                if (fixedHeight) {
-                    canvas.translate(0f, -(pageNumber * pageHeightPx).toFloat())
-                }
-                canvas.drawBitmap(this, 0f, 0f, null)
-                canvas.restore()
-                document.finishPage(page)
-            }
-            FileOutputStream(outFile).use { document.writeTo(it) }
-        } finally {
-            document.close()
-        }
-    }
-
-    private fun mmToPdfPoints(mm: Float): Int =
-        ((mm / 25.4f) * 72f).toInt().coerceAtLeast(1)
-
+    private fun safe(value: String): String = value.replace(Regex("[^A-Za-z0-9_-]"), "_")
+    private fun stamp(): String = SimpleDateFormat("yyyyMMdd_HHmmss", Locale.US).format(Date())
+    private fun money(v: Double): String = String.format(Locale.US, "%.2f", v)
 }

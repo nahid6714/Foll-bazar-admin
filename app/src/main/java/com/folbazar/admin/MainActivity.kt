@@ -12,6 +12,7 @@ class MainActivity : ComponentActivity() {
         super.onCreate(savedInstanceState)
 
         Session.init(this)
+        com.folbazar.admin.ui.theme.ThemePrefs.init(this)
 
         setContent {
             FolBazarTheme {

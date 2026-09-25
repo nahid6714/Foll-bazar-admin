@@ -1,0 +1,19 @@
+Fol Bazar Admin v19 - Banner Category support
+
+The Android app now sends category_id when creating/updating a banner.
+The production backend banners.php must accept and persist this field.
+
+CREATE:
+  $categoryId = $payload['category_id'] ?? null;
+  Include category_id in the INSERT column list and values.
+
+UPDATE:
+  $categoryId = $payload['category_id'] ?? null;
+  Include category_id = :category_id in the UPDATE statement.
+
+LIST:
+  Return category_id. If the UI wants category_name directly, join categories on
+  site_banners.category_id = categories.id and return categories.name AS category_name.
+
+Run SERVER-UPDATE/site_banners_category_migration.sql first if the column is missing.
+Do not apply the ALTER TABLE twice.

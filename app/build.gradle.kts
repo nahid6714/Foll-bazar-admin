@@ -21,7 +21,7 @@ android {
         minSdk=26
         targetSdk=35
         val versionCodeValue = (System.getenv("APP_VERSION_CODE")?.toIntOrNull()
-            ?: prop("APP_VERSION_CODE").toIntOrNull() ?: 1).coerceAtLeast(1)
+            ?: prop("APP_VERSION_CODE").toIntOrNull() ?: 19).coerceAtLeast(1)
         val versionNameValue = System.getenv("APP_VERSION_NAME")?.takeIf { it.isNotBlank() }
             ?: prop("APP_VERSION_NAME").takeIf { it.isNotBlank() }
             ?: "1.1.$versionCodeValue"

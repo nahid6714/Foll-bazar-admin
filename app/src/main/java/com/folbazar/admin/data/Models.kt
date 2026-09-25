@@ -137,6 +137,8 @@ data class SiteBanner(
     val altText: String = "ফল বাজার ব্যানার",
     val imageUrl: String,
     val linkUrl: String? = null,
+    val categoryId: String? = null,
+    val categoryName: String? = null,
     val sortOrder: Int = 0,
     val active: Boolean = true,
     val widthPercent: Int = 100,
