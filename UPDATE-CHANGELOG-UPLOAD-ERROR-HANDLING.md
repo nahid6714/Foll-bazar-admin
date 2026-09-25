@@ -20,3 +20,7 @@
 ## Upload endpoint
 
 `https://lakebazar.com/backend/api/upload.php`
+
+
+## v14.1 Build Fix
+- Fixed Kotlin compilation error in `ServerStorageClient.kt` by importing `java.net.UnknownHostException`, which is used by the detailed upload error handler.
