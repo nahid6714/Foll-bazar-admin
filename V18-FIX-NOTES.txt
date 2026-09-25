@@ -1,0 +1,12 @@
+Fol Bazar Admin v18 — upload URL resolution fix
+
+Root cause fixed:
+- The PHP server correctly returns /backend/uploads/products/...
+- v17 incorrectly derived the origin as https://lakebazar.com/backend
+- This produced https://lakebazar.com/backend/backend/uploads/... inside the Android app.
+
+Fix:
+- ServerStorageClient now extracts the true site origin (https://lakebazar.com) from the API URL.
+- Relative /backend/uploads/... responses therefore resolve to the correct absolute URL.
+- Existing duplicate /backend/backend/uploads/ normalization is retained.
+- Product main-image assignment from v17 is retained.

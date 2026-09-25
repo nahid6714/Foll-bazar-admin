@@ -303,9 +303,20 @@ class ServerStorageClient(private val context: Context) {
             return value
         }
 
-        val origin = baseUrl
-            .substringBefore("/api", baseUrl)
-            .trimEnd('/')
+        // Build the site ORIGIN, not the API directory.
+        // baseUrl = https://lakebazar.com/backend/api
+        // origin must be https://lakebazar.com, otherwise
+        // /backend/uploads/... becomes /backend/backend/uploads/... .
+        val origin = try {
+            val uri = java.net.URI(baseUrl)
+            val scheme = uri.scheme ?: "https"
+            val authority = uri.rawAuthority ?: throw IllegalArgumentException("Missing URL authority")
+            "$scheme://$authority"
+        } catch (_: Exception) {
+            baseUrl
+                .substringBefore("/backend/api", baseUrl)
+                .trimEnd('/')
+        }
 
         return if (value.startsWith("/")) {
             origin + value
