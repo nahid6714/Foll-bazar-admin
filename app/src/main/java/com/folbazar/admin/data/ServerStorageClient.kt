@@ -2,6 +2,7 @@ package com.folbazar.admin.data
 
 import android.content.Context
 import android.net.Uri
+import android.os.NetworkOnMainThreadException
 import com.folbazar.admin.BuildConfig
 import kotlinx.serialization.json.Json
 import kotlinx.serialization.json.JsonObject
@@ -9,6 +10,8 @@ import kotlinx.serialization.json.booleanOrNull
 import kotlinx.serialization.json.contentOrNull
 import kotlinx.serialization.json.jsonObject
 import kotlinx.serialization.json.jsonPrimitive
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.withContext
 import okhttp3.MediaType.Companion.toMediaType
 import okhttp3.MultipartBody
 import okhttp3.OkHttpClient
@@ -45,7 +48,8 @@ class ServerStorageClient(private val context: Context) {
     suspend fun uploadImage(
         uri: Uri,
         folder: String = "products"
-    ): Result<String> = runCatching {
+    ): Result<String> = withContext(Dispatchers.IO) {
+        runCatching {
 
         if (folder !in setOf("products", "banners", "categories")) {
             throw IOException("Upload folder invalid: $folder")
@@ -175,15 +179,21 @@ class ServerStorageClient(private val context: Context) {
                     "Could not connect to upload server: $endpoint",
                     e
                 )
+            } catch (e: NetworkOnMainThreadException) {
+                throw IOException(
+                    "Upload was attempted on the Android main thread. The app build has been updated to move upload/network work to Dispatchers.IO.",
+                    e
+                )
             }
 
         } finally {
             temp.delete()
         }
-    }.fold(
-        onSuccess = { Result.success(it) },
-        onFailure = { Result.failure(normalizeError(it)) }
-    )
+        }.fold(
+            onSuccess = { Result.success(it) },
+            onFailure = { Result.failure(normalizeError(it)) }
+        )
+    }
 
     private fun queryDisplayName(uri: Uri): String? {
         return try {
