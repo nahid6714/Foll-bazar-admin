@@ -984,17 +984,26 @@ private fun AdminImageControl(
     val context = LocalContext.current
     val scope = rememberCoroutineScope()
     var uploading by remember { mutableStateOf(false) }
+    var uploadError by remember { mutableStateOf<String?>(null) }
     val picker = rememberLauncherForActivityResult(ActivityResultContracts.GetContent()) { uri ->
         if (uri != null) {
             uploading = true
+            uploadError = null
             scope.launch {
                 onUpload(uri).fold(
                     { onImageUrlChange(it) },
-                    { Toast.makeText(context, it.message ?: "ছবি আপলোড ব্যর্থ", Toast.LENGTH_LONG).show() }
+                    { uploadError = it.message ?: "ছবি আপলোড ব্যর্থ" }
                 )
                 uploading = false
             }
         }
+    }
+
+    uploadError?.let { error ->
+        UploadErrorDialog(
+            message = error,
+            onDismiss = { uploadError = null }
+        )
     }
 
     Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
@@ -1055,6 +1064,73 @@ private fun AdminImageControl(
             color = MaterialTheme.colorScheme.onSurfaceVariant
         )
     }
+}
+
+
+@Composable
+private fun UploadErrorDialog(
+    message: String,
+    onDismiss: () -> Unit
+) {
+    val context = LocalContext.current
+
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        title = {
+            Text(
+                "ছবি আপলোড ব্যর্থ",
+                fontWeight = FontWeight.Bold
+            )
+        },
+        text = {
+            Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
+                Text(
+                    "সমস্যার বিস্তারিত কারণ:",
+                    fontWeight = FontWeight.Bold
+                )
+                Surface(
+                    modifier = Modifier.fillMaxWidth(),
+                    tonalElevation = 2.dp,
+                    shape = MaterialTheme.shapes.medium
+                ) {
+                    Text(
+                        message,
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(12.dp),
+                        style = MaterialTheme.typography.bodyMedium
+                    )
+                }
+            }
+        },
+        confirmButton = {
+            TextButton(onClick = onDismiss) {
+                Text("ঠিক আছে")
+            }
+        },
+        dismissButton = {
+            TextButton(
+                onClick = {
+                    val clipboard = context.getSystemService(
+                        android.content.Context.CLIPBOARD_SERVICE
+                    ) as ClipboardManager
+                    clipboard.setPrimaryClip(
+                        ClipData.newPlainText(
+                            "Fol Bazar upload error",
+                            message
+                        )
+                    )
+                    Toast.makeText(
+                        context,
+                        "Error details copied",
+                        Toast.LENGTH_SHORT
+                    ).show()
+                }
+            ) {
+                Text("কপি")
+            }
+        }
+    )
 }
 
 @Composable
@@ -1981,6 +2057,7 @@ private fun BannerEditorDialog(
     var link by remember { mutableStateOf(initial?.linkUrl ?: "") }
     var sort by remember { mutableStateOf(initial?.sortOrder?.toString() ?: "0") }
     var active by remember { mutableStateOf(initial?.active ?: true) }
+    var uploadError by remember { mutableStateOf<String?>(null) }
     // Website ব্যানার সবসময় ফ্রেমের পুরো জায়গা নেয় (responsive), তাই ম্যানুয়াল width/height
     // নিয়ন্ত্রণের কোনো প্রয়োজন নেই — একটা স্থির ডিফল্ট মান পাঠানো হয় ব্যাকওয়ার্ড কম্প্যাটিবিলিটির জন্য।
     val widthPercent = 100
@@ -1993,11 +2070,18 @@ private fun BannerEditorDialog(
             uploadScope.launch {
                 ServerStorageClient(context).uploadImage(uri, "banners").fold(
                     { imageUrl = it },
-                    { Toast.makeText(context, it.message ?: "ছবি আপলোড ব্যর্থ", Toast.LENGTH_LONG).show() }
+                    { uploadError = it.message ?: "ছবি আপলোড ব্যর্থ" }
                 )
                 uploading = false
             }
         }
+    }
+
+    uploadError?.let { error ->
+        UploadErrorDialog(
+            message = error,
+            onDismiss = { uploadError = null }
+        )
     }
 
     FullScreenEditorPage(
@@ -2264,17 +2348,28 @@ private fun SettingsScreen(onLogout: () -> Unit) {
     var installedFile by remember { mutableStateOf<java.io.File?>(null) }
     var logoUrl by remember { mutableStateOf("") }
     var logoUploading by remember { mutableStateOf(false) }
+    var uploadError by remember { mutableStateOf<String?>(null) }
     val logoPicker = rememberLauncherForActivityResult(ActivityResultContracts.GetContent()) { uri ->
         if (uri != null) {
             logoUploading = true
             scope.launch {
                 ServerStorageClient(context).uploadImage(uri, "banners").fold(
-                    { url -> logoUrl = url; Repository().saveSetting("logo_url", JsonPrimitive(url)) },
-                    { message = it.message ?: "লোগো আপলোড ব্যর্থ" }
+                    { url ->
+                        logoUrl = url
+                        Repository().saveSetting("logo_url", JsonPrimitive(url))
+                    },
+                    { uploadError = it.message ?: "লোগো আপলোড ব্যর্থ" }
                 )
                 logoUploading = false
             }
         }
+    }
+
+    uploadError?.let { error ->
+        UploadErrorDialog(
+            message = error,
+            onDismiss = { uploadError = null }
+        )
     }
 
     fun check() {
