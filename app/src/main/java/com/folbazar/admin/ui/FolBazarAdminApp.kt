@@ -698,8 +698,12 @@ private fun ProductDialog(
                     )
                 }
                 if (uploaded.isNotEmpty()) {
-                    galleryUrls = (galleryUrls + uploaded).distinct()
-                    if (image.isNullOrBlank()) image = uploaded.first()
+                    // A newly uploaded product image becomes the main image.
+                    // Keep all uploaded images in gallery_urls as well.
+                    val newMainImage = uploaded.first()
+                    galleryUrls = (listOf(newMainImage) + galleryUrls + uploaded)
+                        .distinct()
+                    image = newMainImage
                 }
                 if (failed != null) formError = failed
                 uploading = false

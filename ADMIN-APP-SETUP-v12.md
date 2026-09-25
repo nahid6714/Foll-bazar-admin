@@ -29,11 +29,11 @@ The app reads the Laravel `{ok:true,data:{url,path}}` response and stores the re
 
 ## Important fixes
 - Admin login uses `/backend/api/auth/login` instead of the obsolete legacy login path.
-- CRUD uses the current `/backend/backend/api/*` Laravel routes.
+- CRUD uses the current `/backend/api/*` Laravel routes.
 - Product gallery URLs are supported in the Android model.
-- Order details read items from `/backend/backend/api/orders/{id}`.
+- Order details read items from `/backend/api/orders/{id}`.
 - Site settings use `setting_key` / `setting_value`.
-- Wishlist analytics uses `/backend/backend/api/wishlist-summary`.
+- Wishlist analytics uses `/backend/api/wishlist-summary`.
 - Complaint admin notes are supported.
 - Category descriptions are supported.
 - Legacy cloud/database runtime dependencies were removed from the Android module.

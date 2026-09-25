@@ -289,7 +289,16 @@ class ServerStorageClient(private val context: Context) {
     }
 
     private fun resolveUrl(raw: String): String {
-        val value = raw.trim()
+        var value = raw.trim()
+
+        // The production upload URL is /backend/uploads/...
+        // Guard against an accidental duplicate /backend/backend/ path
+        // returned by an older server-side implementation.
+        value = value.replace(
+            "/backend/backend/uploads/",
+            "/backend/uploads/"
+        )
+
         if (value.startsWith("https://", true) || value.startsWith("http://", true)) {
             return value
         }

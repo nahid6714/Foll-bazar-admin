@@ -1,0 +1,15 @@
+Fol Bazar Admin v17 — image upload fix
+
+1. Product image upload:
+   - Every newly uploaded product image is now assigned to image_url as the new main image.
+   - Uploaded images are also retained in gallery_urls.
+   - The first newly uploaded image is placed first in gallery_urls.
+
+2. Upload URL safety:
+   - Client normalizes an accidental /backend/backend/uploads/ response to
+     /backend/uploads/ before saving/using the URL.
+
+3. Documentation:
+   - Removed stale /backend/backend/api references from the main setup/readme docs.
+
+The PHP upload endpoint and database schema are not changed by this source update.
