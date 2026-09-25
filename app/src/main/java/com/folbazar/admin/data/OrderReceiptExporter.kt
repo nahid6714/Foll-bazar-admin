@@ -115,7 +115,7 @@ object OrderReceiptExporter {
     fun saveImageToDownloads(context: Context, source: File) = saveToDownloads(context, source, "image/png", "image/png")
     fun savePdfToDownloads(context: Context, source: File) = saveToDownloads(context, source, "application/pdf", "application/pdf")
 
-    private fun saveToDownloads(context: Context, source: File, mime: String, _: String) {
+    private fun saveToDownloads(context: Context, source: File, mime: String, contentType: String) {
         require(source.exists()) { "Receipt file was not created" }
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
             val values = ContentValues().apply {
