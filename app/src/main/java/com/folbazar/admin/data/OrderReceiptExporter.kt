@@ -1,19 +1,25 @@
 package com.folbazar.admin.data
 
 import android.app.Activity
+import android.content.ContentValues
 import android.content.Context
 import android.content.ContextWrapper
-import android.content.Intent
 import android.graphics.*
 import android.graphics.pdf.PdfDocument
+import android.os.Build
+import android.os.Environment
+import android.provider.MediaStore
+import android.widget.Toast
 import androidx.core.content.FileProvider
+import android.content.Intent
 import java.io.File
 import java.io.FileOutputStream
+import java.io.OutputStream
 import java.text.SimpleDateFormat
 import java.util.Date
 import java.util.Locale
 
-/** Robust receipt exporter. Files are written inside a FileProvider-approved cache path. */
+/** Receipt generator. Files are generated in an app cache directory first, then copied to Downloads on Android 10+. */
 enum class ReceiptPaperSize(val label: String, val widthPx: Int, val pageHeightPx: Int) {
     A4("A4", 794, 1123),
     A5("A5", 559, 794),
@@ -32,34 +38,34 @@ object OrderReceiptExporter {
     }
 
     private fun receiptDir(context: Context): File = File(context.cacheDir, "receipts").apply { mkdirs() }
-
-    private fun paint(size: Float, bold: Boolean = false): Paint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
+    private fun paint(size: Float, bold: Boolean = false) = Paint(Paint.ANTI_ALIAS_FLAG).apply {
         color = Color.BLACK
         textSize = size
         typeface = if (bold) Typeface.DEFAULT_BOLD else Typeface.DEFAULT
     }
+    private fun money(v: Double) = String.format(Locale.US, "%.2f", v)
+    private fun safe(v: String) = v.replace(Regex("[^A-Za-z0-9_-]"), "_")
+    private fun stamp() = SimpleDateFormat("yyyyMMdd_HHmmss", Locale.US).format(Date())
 
-    private fun lines(order: Order, items: List<OrderItem>): List<String> {
-        val out = mutableListOf<String>()
-        out += "ফল বাজার"
-        out += "অর্ডার #${order.orderNumber}"
-        out += "কাস্টমার: ${order.customer}"
-        out += "ফোন: ${order.phone}"
-        out += "তারিখ: ${order.createdAt ?: "-"}"
-        out += "--------------------------------"
+    private fun lines(order: Order, items: List<OrderItem>): List<String> = buildList {
+        add("ফল বাজার")
+        add("অর্ডার #${order.orderNumber}")
+        add("কাস্টমার: ${order.customer}")
+        add("ফোন: ${order.phone}")
+        add("তারিখ: ${order.createdAt ?: "-"}")
+        add("--------------------------------")
         items.forEach { item ->
             val variant = item.variantLabel?.takeIf { it.isNotBlank() }?.let { " ($it)" } ?: ""
-            out += "${item.productName}$variant x${item.quantity}"
-            out += "৳ ${money(item.lineTotal)}"
+            add("${item.productName}$variant x${item.quantity}")
+            add("৳ ${money(item.lineTotal)}")
         }
-        out += "--------------------------------"
-        out += "Subtotal: ৳ ${money(order.subtotal)}"
-        out += "Delivery: ৳ ${money(order.deliveryCharge)}"
-        out += "Discount: ৳ ${money(order.discount)}"
-        out += "TOTAL: ৳ ${money(order.total)}"
-        out += "Payment: ${order.paymentMethod}"
-        out += "Status: ${order.status}"
-        return out
+        add("--------------------------------")
+        add("Subtotal: ৳ ${money(order.subtotal)}")
+        add("Delivery: ৳ ${money(order.deliveryCharge)}")
+        add("Discount: ৳ ${money(order.discount)}")
+        add("TOTAL: ৳ ${money(order.total)}")
+        add("Payment: ${order.paymentMethod}")
+        add("Status: ${order.status}")
     }
 
     fun exportImage(activity: Activity, order: Order, items: List<OrderItem>, size: ReceiptPaperSize): File {
@@ -86,12 +92,12 @@ object OrderReceiptExporter {
 
     fun exportPdf(activity: Activity, order: Order, items: List<OrderItem>, size: ReceiptPaperSize): File {
         val document = PdfDocument()
+        val content = lines(order, items)
         val pageWidth = size.widthPx
-        val pageHeight = maxOf(size.pageHeightPx, 80 + lines(order, items).size * 34)
+        val pageHeight = maxOf(size.pageHeightPx, 80 + content.size * 34)
         val page = document.startPage(PdfDocument.PageInfo.Builder(pageWidth, pageHeight, 1).create())
         val canvas = page.canvas
         canvas.drawColor(Color.WHITE)
-        val content = lines(order, items)
         val normal = paint(if (pageWidth < 350) 18f else 20f)
         val bold = paint(if (pageWidth < 350) 18f else 20f, true)
         var y = 36f
@@ -106,6 +112,40 @@ object OrderReceiptExporter {
         return file
     }
 
+    fun saveImageToDownloads(context: Context, source: File) = saveToDownloads(context, source, "image/png", "image/png")
+    fun savePdfToDownloads(context: Context, source: File) = saveToDownloads(context, source, "application/pdf", "application/pdf")
+
+    private fun saveToDownloads(context: Context, source: File, mime: String, _: String) {
+        require(source.exists()) { "Receipt file was not created" }
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
+            val values = ContentValues().apply {
+                put(MediaStore.Downloads.DISPLAY_NAME, source.name)
+                put(MediaStore.Downloads.MIME_TYPE, mime)
+                put(MediaStore.Downloads.RELATIVE_PATH, Environment.DIRECTORY_DOWNLOADS + "/Fol Bazar Receipts")
+                put(MediaStore.Downloads.IS_PENDING, 1)
+            }
+            val uri = context.contentResolver.insert(MediaStore.Downloads.EXTERNAL_CONTENT_URI, values)
+                ?: throw IllegalStateException("Downloads folder-এ ফাইল তৈরি করা যায়নি")
+            try {
+                val outStream = context.contentResolver.openOutputStream(uri)
+                    ?: throw IllegalStateException("Downloads output stream পাওয়া যায়নি")
+                outStream.use { out ->
+                    source.inputStream().use { input -> input.copyTo(out) }
+                }
+                ContentValues().apply { put(MediaStore.Downloads.IS_PENDING, 0) }.also {
+                    context.contentResolver.update(uri, it, null, null)
+                }
+                Toast.makeText(context, "রশিদ Downloads/Fol Bazar Receipts-এ সেভ হয়েছে", Toast.LENGTH_LONG).show()
+            } catch (e: Exception) {
+                context.contentResolver.delete(uri, null, null)
+                throw e
+            }
+        } else {
+            // Android 8/9 fallback: share from the approved FileProvider cache path.
+            shareFile(context, source, mime)
+        }
+    }
+
     fun shareFile(context: Context, file: File, mime: String) {
         require(file.exists()) { "Receipt file was not created" }
         val uri = FileProvider.getUriForFile(context, "${context.packageName}.fileprovider", file)
@@ -116,8 +156,4 @@ object OrderReceiptExporter {
         }
         context.startActivity(Intent.createChooser(intent, "রশিদ সেভ / শেয়ার করুন"))
     }
-
-    private fun safe(value: String): String = value.replace(Regex("[^A-Za-z0-9_-]"), "_")
-    private fun stamp(): String = SimpleDateFormat("yyyyMMdd_HHmmss", Locale.US).format(Date())
-    private fun money(v: Double): String = String.format(Locale.US, "%.2f", v)
 }

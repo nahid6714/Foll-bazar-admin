@@ -49,7 +49,9 @@ object ThemePrefs {
 
     fun init(context: Context) {
         prefs = context.applicationContext.getSharedPreferences(PREF, Context.MODE_PRIVATE)
-        mode = runCatching { Mode.valueOf(prefs?.getString(KEY, Mode.SYSTEM.name) ?: Mode.SYSTEM.name) }.getOrDefault(Mode.SYSTEM)
+        mode = runCatching {
+            Mode.valueOf(prefs?.getString(KEY, Mode.SYSTEM.name) ?: Mode.SYSTEM.name)
+        }.getOrDefault(Mode.SYSTEM)
     }
 
     fun updateMode(value: Mode) {
@@ -60,7 +62,7 @@ object ThemePrefs {
 
 @Composable
 fun FolBazarTheme(content: @Composable () -> Unit) {
-    val dark = when (mode) {
+    val dark = when (ThemePrefs.mode) {
         ThemePrefs.Mode.DARK -> true
         ThemePrefs.Mode.LIGHT -> false
         ThemePrefs.Mode.SYSTEM -> isSystemInDarkTheme()
