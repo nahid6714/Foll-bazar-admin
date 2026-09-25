@@ -1,0 +1,11 @@
+Fol Bazar Admin v16
+
+Fixes:
+- Upload failures now stay visible and show detailed server/network reason.
+- Local preview remains visible when server upload fails.
+- Update checker always tests the direct backend update.php endpoint first.
+- Update checker now reports ALL manifest URLs/errors instead of hiding the real error behind the legacy HTML URL.
+- GitHub Actions version name bumped to 1.3.x.
+- SERVER-FIX contains upload.php and update.php for cPanel.
+
+Important: the APK currently installed on the phone is 1.1.1 according to the screenshot; that is not the GitHub Actions 1.3.x build. Build and install the new APK before testing the new update checker.

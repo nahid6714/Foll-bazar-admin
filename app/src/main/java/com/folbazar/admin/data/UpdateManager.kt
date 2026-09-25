@@ -51,6 +51,7 @@ data class DownloadState(
 object UpdateManager {
     private val updateManifestUrls: List<String>
         get() = listOf(
+            "https://lakebazar.com/backend/api/update.php?action=manifest",
             BuildConfig.ADMIN_UPDATE_MANIFEST_URL.trim(),
             BuildConfig.ADMIN_UPDATE_BASE_URL.trim().trimEnd('/') + "/update.json"
         ).filter { it.isNotBlank() }.distinct()
@@ -68,7 +69,7 @@ object UpdateManager {
         }
 
     suspend fun checkForUpdate(): UpdateResult = withContext(Dispatchers.IO) {
-        var lastError = "Update check করা যায়নি"
+        val errors = mutableListOf<String>()
 
         for (manifestUrl in updateManifestUrls) {
             try {
@@ -79,13 +80,13 @@ object UpdateManager {
                     val body = conn.inputStream.bufferedReader().use { it.readText() }
 
                     if (code !in 200..299) {
-                        lastError = "Update manifest check failed: HTTP $code\nURL: $manifestUrl"
+                        errors += "HTTP $code ${conn.responseMessage ?: ""}\nURL: $manifestUrl"
                         continue
                     }
 
                     val trimmed = body.trimStart()
                     if (trimmed.startsWith("<")) {
-                        lastError = buildString {
+                        errors += buildString {
                             append("Update server JSON না দিয়ে HTML পাঠাচ্ছে.\n")
                             append("URL: $manifestUrl\n")
                             append("Content-Type: ${contentType.ifBlank { "unknown" }}\n")
@@ -97,7 +98,7 @@ object UpdateManager {
                     val root = try {
                         Json.parseToJsonElement(body).jsonObject
                     } catch (e: Exception) {
-                        lastError = "Update manifest-এর JSON invalid.\nURL: $manifestUrl\nResponse: ${body.take(500)}"
+                        errors += "Update manifest-এর JSON invalid.\nURL: $manifestUrl\nResponse: ${body.take(500)}"
                         continue
                     }
 
@@ -114,7 +115,7 @@ object UpdateManager {
                     val releaseUrl = root["releaseUrl"]?.jsonPrimitive?.content.orEmpty()
 
                     if (versionCode <= 0 || downloadUrl.isBlank()) {
-                        lastError = "Update manifest-এ versionCode/downloadUrl সঠিক নেই.\nURL: $manifestUrl"
+                        errors += "Update manifest-এ versionCode/downloadUrl সঠিক নেই.\nURL: $manifestUrl"
                         continue
                     }
 
@@ -129,17 +130,20 @@ object UpdateManager {
                     conn.disconnect()
                 }
             } catch (e: java.net.SocketTimeoutException) {
-                lastError = "Update check timeout.\nURL: $manifestUrl"
+                errors += "Update check timeout.\nURL: $manifestUrl"
             } catch (e: java.net.UnknownHostException) {
-                lastError = "Update server domain পাওয়া যায়নি.\nURL: $manifestUrl"
+                errors += "Update server domain পাওয়া যায়নি.\nURL: $manifestUrl"
             } catch (e: java.net.ConnectException) {
-                lastError = "Update server-এ connect করা যায়নি.\nURL: $manifestUrl"
+                errors += "Update server-এ connect করা যায়নি.\nURL: $manifestUrl"
             } catch (e: Exception) {
-                lastError = "Update check error: ${e.message ?: e::class.java.simpleName}\nURL: $manifestUrl"
+                errors += "Update check error: ${e.message ?: e::class.java.simpleName}\nURL: $manifestUrl"
             }
         }
 
-        UpdateResult.Error(lastError)
+        UpdateResult.Error(
+            "Update check ব্যর্থ। যেসব URL পরীক্ষা করা হয়েছে:\n\n" +
+                errors.joinToString("\n\n---\n\n").ifBlank { "কোনো response পাওয়া যায়নি" }
+        )
     }
 
     suspend fun downloadUpdate(

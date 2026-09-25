@@ -691,7 +691,12 @@ private fun ProductDialog(
                             uploaded += it
                             localPreviewUris = localPreviewUris.filterNot { pending -> pending == uri }
                         },
-                        { failed = it.message ?: "ছবি আপলোড ব্যর্থ" }
+                        { error ->
+                            val name = uri.lastPathSegment?.substringAfterLast('/')?.takeLast(80) ?: "নির্বাচিত ছবি"
+                            failed = "ছবি আপলোড ব্যর্থ
+ফাইল: $name
+কারণ: ${error.message ?: "অজানা সমস্যা"}"
+                        }
                     )
                 }
                 if (uploaded.isNotEmpty()) {
@@ -934,7 +939,17 @@ private fun ProductDialog(
                 SwitchRow("Featured", featured) { featured = it }
                 SwitchRow("Flash sale", flash) { flash = it }
                 SwitchRow("Hot deal", hot) { hot = it }
-                formError?.let { Text(it, color = MaterialTheme.colorScheme.error) }
+                formError?.let { error ->
+                    Text(
+                        error,
+                        color = MaterialTheme.colorScheme.error,
+                        style = MaterialTheme.typography.bodySmall
+                    )
+                    UploadErrorDialog(
+                        message = error,
+                        onDismiss = { formError = null }
+                    )
+                }
     }
 
     if (addVariant && initial != null) {
